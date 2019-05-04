@@ -5,7 +5,9 @@ authors = ["James Wilson <james@jsdw.me>"]
 edition = "2018"
 
 [dependencies]
-hyper = "0.12.27"
-structopt = "0.2.15"
+hyper = "0.12.28"
+clap = "~2.33.0"
 url = "1.7.2"
 regex = "1.1.6"
+ansi_term = "0.11.0"
+futures-preview = { version = "0.3.0-alpha.15", features = ["compat"] }

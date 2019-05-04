@@ -1,6 +1,7 @@
 use url::Url;
 use std::str::FromStr;
 use std::path::PathBuf;
+use std::net::{ SocketAddr, ToSocketAddrs };
 use std::fmt;
 use crate::errors::{ Error };
 
@@ -156,6 +157,24 @@ impl Location {
         }
 
         Ok(Location::Url(url))
+    }
+    fn to_socket_addr(&self) -> Result<SocketAddr, Error> {
+        let url = match self {
+            Location::Url(url) => url,
+            Location::FilePath(path) => {
+                return Err(err!("The path {} is not a valid socket address to listen on", path.to_string_lossy()))
+            }
+        };
+
+        let mut addrs = url.to_socket_addrs().map_err(|e| {
+            err!("Cannot parse socket address to listen on: {}", e)
+        })?;
+
+        if let Some(addr) = addrs.next() {
+            Ok(addr)
+        } else {
+            Err(err!("Cannot parse socket address to listen on"))
+        }
     }
 }
 
