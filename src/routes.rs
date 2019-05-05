@@ -206,6 +206,7 @@ mod test {
 
     fn s (s: &str) -> String { s.to_owned() }
     fn u (u: &str) -> Location { Location::Url(Url::from_str(u).unwrap()) }
+    fn url (u: &str) -> Url { Url::from_str(u).unwrap() }
 
     #[test]
     fn location_can_parse_valid_urls() {
@@ -281,8 +282,8 @@ mod test {
                 vec![s("8080"), s("to"), s("9090")],
                 vec![
                     Route {
-                        from: u("http://localhost:8080/"),
-                        to: u("http://localhost:9090")
+                        src: url("http://localhost:8080/"),
+                        dest: u("http://localhost:9090")
                     }
                 ],
                 0
@@ -291,8 +292,8 @@ mod test {
                 vec![s("8080/foo/bar"), s("to"), s("9090/foo"), s("more"), s("args")],
                 vec![
                     Route {
-                        from: u("http://localhost:8080/foo/bar"),
-                        to: u("http://localhost:9090/foo")
+                        src: url("http://localhost:8080/foo/bar"),
+                        dest: u("http://localhost:9090/foo")
                     }
                 ],
                 2
@@ -303,12 +304,12 @@ mod test {
                      s("more"), s("args")],
                 vec![
                     Route {
-                        from: u("http://localhost:8080/foo/bar"),
-                        to: u("http://localhost:9090/foo")
+                        src: url("http://localhost:8080/foo/bar"),
+                        dest: u("http://localhost:9090/foo")
                     },
                     Route {
-                        from: u("http://localhost:9091/"),
-                        to: u("http://localhost:9090/lark")
+                        src: url("http://localhost:9091/"),
+                        dest: u("http://localhost:9090/lark")
                     }
                 ],
                 2

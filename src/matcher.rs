@@ -1,5 +1,7 @@
 use hyper::Uri;
+use url::Url;
 use std::cmp::Reverse;
+use std::path::PathBuf;
 use crate::routes::{ Route, Location };
 
 #[derive(Debug)]
@@ -45,10 +47,115 @@ impl Matcher {
     }
 }
 
-fn merge_uri_with_url(tail: &str, uri: &Uri, url: Url) -> Url {
-    unimplemented!()
+fn merge_uri_with_url(tail: &str, uri: &Uri, mut url: Url) -> Url {
+
+    let curr_path = url.path().trim_end_matches('/');
+    let tail_path = tail.trim_start_matches('/');
+    let combined_path = format!("{}/{}", curr_path, tail_path);
+
+    url.set_path(&combined_path);
+
+    let curr_query = url.query()
+        .map(|q| q.to_owned())
+        .unwrap_or(String::new());
+    let uri_query = uri.query()
+        .map(|q| q.to_owned())
+        .unwrap_or(String::new());
+
+    if !curr_query.is_empty() && !uri_query.is_empty() {
+        url.set_query(Some(&format!("{}&{}", curr_query, uri_query)));
+    } else if !curr_query.is_empty() || !uri_query.is_empty() {
+        url.set_query(Some(&format!("{}{}", curr_query, uri_query)));
+    } else {
+        url.set_query(None);
+    }
+
+    url
 }
 
-fn merge_uri_with_path(tail: &str, uri: &Uri, path: PathBuf) -> PathBuf {
-    unimplemented!()
+fn merge_uri_with_path(tail: &str, _uri: &Uri, mut path: PathBuf) -> PathBuf {
+
+    let bits = tail.split('/').filter(|s| !s.is_empty());
+    let mut appended = 0;
+
+    for bit in bits {
+        // Ignore bits that would do nothing:
+        if bit == "." || bit.is_empty() {
+            continue
+        }
+        // Only allow going up in the path if we've gone down:
+        else if bit == ".." {
+            if appended > 0 {
+                path.pop();
+                appended -= 1;
+            }
+        }
+        // Append ordinary path pieces:
+        else {
+            path.push(bit);
+            appended += 1;
+        }
+    }
+
+    path
+}
+
+#[cfg(test)]
+mod test {
+
+    use std::str::FromStr;
+    use hyper::Uri;
+    use url::Url;
+    use std::path::PathBuf;
+
+    use super::*;
+
+    fn uri (s: &str) -> Uri { s.parse().unwrap() }
+    fn url (u: &str) -> Url { Url::from_str(u).unwrap() }
+    fn path (s: &str) -> PathBuf { s.into() }
+
+    #[test]
+    fn merge_with_urls() {
+        let cases = vec![
+            // Some basic checks:
+            ("/bar", uri("/"), url("http://localhost"), url("http://localhost/bar")),
+            ("/bar/", uri("/"), url("http://localhost:8080/"), url("http://localhost:8080/bar/")),
+            ("bar/", uri("/"), url("http://localhost"), url("http://localhost/bar/")),
+            // Merging paths:
+            ("/bar", uri("/"), url("http://localhost/lark"), url("http://localhost/lark/bar")),
+            ("/bar/", uri("/"), url("http://localhost/lark/foo"), url("http://localhost/lark/foo/bar/")),
+            ("bar/", uri("/"), url("http://localhost/lark"), url("http://localhost/lark/bar/")),
+            // Merging paths and query strings:
+            ("/bar", uri("/"), url("http://localhost/lark?a=2"), url("http://localhost/lark/bar?a=2")),
+            ("/bar/", uri("/?b=hi"), url("http://localhost/lark/foo?a=bye"), url("http://localhost/lark/foo/bar/?a=bye&b=hi")),
+            // TODO: Override query params with those from URI rather than just combining them:
+            ("bar/", uri("/?b=hi&c=2"), url("http://localhost/lark?c=6"), url("http://localhost/lark/bar/?c=6&b=hi&c=2")),
+        ];
+
+        for (tail, uri, url, expected) in cases {
+            assert_eq!(merge_uri_with_url(tail, &uri, url), expected);
+        }
+    }
+
+    #[test]
+    fn merge_with_paths() {
+        let cases = vec![
+            // Basic checks:
+            ("/bar", path("../foo"), path("../foo/bar")),
+            ("/bar/wibble", path("../foo"), path("../foo/bar/wibble")),
+            ("/bar/wibble/something.jpg", path("../foo"), path("../foo/bar/wibble/something.jpg")),
+            // '..' parts can only undo additional parts of the path:
+            ("/../../../", path("../foo"), path("../foo")),
+            ("/../bar", path("../foo"), path("../foo/bar")),
+            ("/../../bar", path("../foo"), path("../foo/bar")),
+            ("/bar/../", path("../foo"), path("../foo/")),
+            ("/bar/../lark", path("../foo"), path("../foo/lark")),
+            ("./bar/.././lark", path("../foo"), path("../foo/lark")),
+        ];
+
+        for (tail, path, expected) in cases {
+            assert_eq!(merge_uri_with_path(tail, &uri("/"), path), expected);
+        }
+    }
+
 }
