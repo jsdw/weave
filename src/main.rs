@@ -1,18 +1,23 @@
-#![feature(futures_api, async_await, await_macro)]
+#![feature(async_await, await_macro)]
 
 #[macro_use] mod errors;
 mod routes;
+mod matcher;
 
 use std::env;
+use std::collections::HashMap;
+use std::net::SocketAddr;
 use clap::{ App, AppSettings };
 use errors::{ Error };
-use hyper::{Body, Response, Server};
+use hyper::{Body, Response, Server, rt};
 use hyper::service::service_fn_ok;
 use ansi_term::Color::Red;
 
 // 0.3 futures and a compat layer to bridge to 0.1:
 use futures::future::{ FutureExt, TryFutureExt };
 use futures::compat::*;
+
+use routes::Route;
 
 static EXAMPLES: &str = "EXAMPLES:
 
@@ -51,41 +56,58 @@ fn run() -> Result<(), Error> {
         return Err(err!("No routes have been provided. Use -h or --help for more information"));
     }
 
-    println!("routes: {:?}", routes);
+    // Partition provided routes based on the SocketAddr we'll serve them on:
+    let mut map = HashMap::new();
+    for route in routes {
+        let socket_addr = route.src_socket_addr()?;
+        let rs: &mut Vec<Route> = map.entry(socket_addr).or_default();
+        rs.push(route);
+    }
 
-    // Go through routes. Try to convert each to a SockeetAddr. make map from SOURCE SocketAddr to
-    // Route (to + from part). Start a hyper server for each SocketAddr. When request comes in to a
-    // given SocketAddr, rty to match to source paths provided (sorted longest first). Proxy matches
-    // to destination as appropriate. use something like hyper-staticfile for static file handling.
-
-    // Construct our SocketAddr to listen on...
-    let addr = ([127, 0, 0, 1], 3000).into();
-
-    // And a MakeService to handle each connection...
-    let make_service = || {
-        service_fn_ok(|_req| {
-            Response::new(Body::from("Hello World"))
-        })
-    };
-
-    // Then bind and serve...
-    let server = Server::bind(&addr)
-        .serve(make_service)
-        .compat();
-
-    let fut = async {
-        if let Err(e) = await!(server) {
-            eprintln!("Error running server: {}", e);
+    // Spawn a server on each SocketAddr to handle incoming requests:
+    let server = async {
+        for (socket_addr, routes) in map {
+            let handler = handle_requests(socket_addr, routes)
+                .unit_error()
+                .boxed()
+                .compat();
+            rt::spawn(handler);
         }
-
         Ok(())
     };
 
-    // Finally, spawn `server` onto an Executor...
-    hyper::rt::run(fut.boxed().compat());
+    // Kick off these async things:
+    hyper::rt::run(server.boxed().compat());
     Ok(())
 }
 
+/// Handle incoming requests by matching on routes and dispatching as necessary
+async fn handle_requests(socket_addr: SocketAddr, routes: Vec<Route>) {
+
+    let socket_addr2 = socket_addr.clone();
+    let make_service = move || {
+
+        let matcher = matcher::Matcher::new(routes.clone());
+        let socket_addr = socket_addr2.clone();
+
+        service_fn_ok(move |req| {
+
+            let loc = matcher.resolve(req.uri());
+
+            let msg = format!("{:?}: req: {:?}, loc: {:?}", socket_addr, req, loc);
+
+
+
+            Response::new(Body::from(msg))
+        })
+    };
+
+    if let Err(e) = await!(Server::bind(&socket_addr).serve(make_service).compat()) {
+        eprintln!("{}: {}", Red.paint("error"), e);
+    }
+}
+
+/// Catch any errors from running and report them back:
 fn main() {
     if let Err(e) = run() {
         eprintln!("{}: {}", Red.paint("error"), e);

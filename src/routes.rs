@@ -17,16 +17,24 @@ pub fn from_args<I: IntoIterator<Item=String>>(args: I) -> Result<(Vec<Route>, i
     let mut expects_more = false;
     while let Some(peeked) = args.peek() {
         let peeked = peeked.clone();
-        if let Ok(from) = Location::parse(&peeked) {
+        if let Ok(src) = Location::parse(&peeked) {
 
             // we've parsed more:
             expects_more = false;
+
+            // `src` needs to be a Url, not a FilePath
+            let src = match src {
+                Location::Url(url) => url,
+                Location::FilePath(path) => {
+                    return Err(err!("The location {} is not a valid route", path.to_string_lossy()))
+                }
+            };
 
             // Next arg is valid Location (we peeked), so assume
             // 'loc to loc' triplet and err if not.
             args.next();
 
-            // The next arg after 'from' loc should be the word 'to'.
+            // The next arg after 'src' loc should be the word 'to'.
             // If it's not, hand back an error:
             let next_is_joiner = if let Some(joiner) = args.next() {
                 if joiner.trim() != "to" {
@@ -43,9 +51,9 @@ pub fn from_args<I: IntoIterator<Item=String>>(args: I) -> Result<(Vec<Route>, i
 
             // The arg following the 'to' should be another location
             // or something is wrong:
-            let to = if let Some(to) = args.next() {
-                Location::parse(&to).map_err(|e| {
-                    err!("Error parsing '{}': {}", to, e)
+            let dest = if let Some(dest) = args.next() {
+                Location::parse(&dest).map_err(|e| {
+                    err!("Error parsing '{}': {}", dest, e)
                 })
             } else {
                 Err(err!("Expecting a destination location to be provided after '{} to'", peeked))
@@ -53,8 +61,8 @@ pub fn from_args<I: IntoIterator<Item=String>>(args: I) -> Result<(Vec<Route>, i
 
             // If we've made it this far, we have a Route:
             routes.push(Route {
-                from,
-                to
+                src,
+                dest
             });
 
             // Now, we either break or the next arg is 'and':
@@ -95,9 +103,24 @@ pub fn from_args<I: IntoIterator<Item=String>>(args: I) -> Result<(Vec<Route>, i
 
 #[derive(Debug,Clone,PartialEq,Eq)]
 pub struct Route {
-    from: Location,
-    to: Location
+    pub src: Url,
+    pub dest: Location
 }
+
+impl Route {
+    pub fn src_socket_addr(&self) -> Result<SocketAddr, Error> {
+        let mut addrs = self.src.to_socket_addrs().map_err(|e| {
+            err!("Cannot parse socket address to listen on: {}", e)
+        })?;
+
+        if let Some(addr) = addrs.next() {
+            Ok(addr)
+        } else {
+            Err(err!("Cannot parse socket address to listen on"))
+        }
+    }
+}
+
 
 #[derive(Debug,Clone,PartialEq,Eq)]
 pub enum Location {
@@ -157,24 +180,6 @@ impl Location {
         }
 
         Ok(Location::Url(url))
-    }
-    fn to_socket_addr(&self) -> Result<SocketAddr, Error> {
-        let url = match self {
-            Location::Url(url) => url,
-            Location::FilePath(path) => {
-                return Err(err!("The path {} is not a valid socket address to listen on", path.to_string_lossy()))
-            }
-        };
-
-        let mut addrs = url.to_socket_addrs().map_err(|e| {
-            err!("Cannot parse socket address to listen on: {}", e)
-        })?;
-
-        if let Some(addr) = addrs.next() {
-            Ok(addr)
-        } else {
-            Err(err!("Cannot parse socket address to listen on"))
-        }
     }
 }
 
