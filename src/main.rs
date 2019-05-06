@@ -7,17 +7,20 @@ mod matcher;
 use std::env;
 use std::collections::HashMap;
 use std::net::SocketAddr;
+use std::sync::Arc;
 use clap::{ App, AppSettings };
-use errors::{ Error };
-use hyper::{Body, Response, Server, rt};
-use hyper::service::service_fn_ok;
+use hyper::{Client, Body, Request, Response, Server, rt};
+use hyper::service::service_fn;
+use hyper_tls::HttpsConnector;
 use ansi_term::Color::Red;
 
 // 0.3 futures and a compat layer to bridge to 0.1:
 use futures::future::{ FutureExt, TryFutureExt };
 use futures::compat::*;
 
-use routes::Route;
+use routes::{ Route, Location };
+use matcher::Matcher;
+use errors::{ Error };
 
 static EXAMPLES: &str = "EXAMPLES:
 
@@ -84,26 +87,64 @@ fn run() -> Result<(), Error> {
 /// Handle incoming requests by matching on routes and dispatching as necessary
 async fn handle_requests(socket_addr: SocketAddr, routes: Vec<Route>) {
 
-    let socket_addr2 = socket_addr.clone();
+    let socket_addr_outer = socket_addr.clone();
+
+    let matcher = Arc::new(Matcher::new(routes));
+    let socket_addr = Arc::new(socket_addr);
+
     let make_service = move || {
+        let socket_addr = Arc::clone(&socket_addr);
+        let matcher = Arc::clone(&matcher);
 
-        let matcher = matcher::Matcher::new(routes.clone());
-        let socket_addr = socket_addr2.clone();
-
-        service_fn_ok(move |req| {
-
-            let loc = matcher.resolve(req.uri());
-
-            let msg = format!("{:?}: req: {:?}, loc: {:?}", socket_addr, req, loc);
-
-
-
-            Response::new(Body::from(msg))
+        service_fn(move |req| {
+            let socket_addr = Arc::clone(&socket_addr);
+            let matcher = Arc::clone(&matcher);
+            let handler = async {
+                let res_fut = handle_request(req, socket_addr, matcher);
+                let res = await!(res_fut);
+                if let Err(e) = &res {
+                    eprintln!("Error: {:?}", e);
+                }
+                res
+            };
+            handler.boxed().compat()
         })
     };
 
-    if let Err(e) = await!(Server::bind(&socket_addr).serve(make_service).compat()) {
+    let server = Server::bind(&socket_addr_outer)
+        .serve(make_service)
+        .compat();
+
+    if let Err(e) = await!(server) {
         eprintln!("{}: {}", Red.paint("error"), e);
+    }
+}
+
+async fn handle_request<'a>(req: Request<Body>, socket_addr: Arc<SocketAddr>, matcher: Arc<Matcher>) -> Result<Response<Body>, Error> {
+    let mut req = req;
+    let loc = matcher.resolve(req.uri());
+
+    match loc {
+        // Proxy to the URI our request matched against:
+        Some(Location::Url(url)) => {
+            // Set the request URI to our new destination:
+            *req.uri_mut() = format!("{}", url).parse().unwrap();
+            // Remove the host header (it's set according to URI if not present):
+            req.headers_mut().remove("host");
+            // Supoprt HTTPS (8 DNS worker threads):
+            let https = HttpsConnector::new(8)?;
+            // Proxy the request through and pass back the response:
+            let response = await!(Client::builder().build(https).request(req).compat())?;
+            Ok(response)
+        },
+        // Proxy to the filesystem:
+        Some(Location::FilePath(path)) => {
+            Ok(Response::new(Body::from("hello world")))
+        },
+        // 404, not found!
+        None => {
+            Ok(Response::new(Body::from("hello world")))
+        }
     }
 }
 

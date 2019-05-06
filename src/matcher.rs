@@ -4,7 +4,7 @@ use std::cmp::Reverse;
 use std::path::PathBuf;
 use crate::routes::{ Route, Location };
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Matcher {
     routes: Vec<Route>
 }
