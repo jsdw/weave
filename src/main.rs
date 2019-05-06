@@ -12,6 +12,7 @@ use clap::{ App, AppSettings };
 use hyper::{Client, Body, Request, Response, Server, rt};
 use hyper::service::service_fn;
 use hyper_tls::HttpsConnector;
+use tokio::fs;
 use ansi_term::Color::Red;
 
 // 0.3 futures and a compat layer to bridge to 0.1:
@@ -101,11 +102,17 @@ async fn handle_requests(socket_addr: SocketAddr, routes: Vec<Route>) {
             let matcher = Arc::clone(&matcher);
             let handler = async {
                 let res_fut = handle_request(req, socket_addr, matcher);
-                let res = await!(res_fut);
-                if let Err(e) = &res {
-                    eprintln!("Error: {:?}", e);
-                }
-                res
+                let res = await!(res_fut).unwrap_or_else(|e| {
+                    eprintln!("{}: {}", Red.paint("error"), e);
+                    Response::builder()
+                        .status(500)
+                        .body(Body::from(format!("Weave: {}", e)))
+                        .unwrap()
+                });
+
+                // We don't return any errors, so need to tell Rust
+                // what the error type would be:
+                Result::<_,Error>::Ok(res)
             };
             handler.boxed().compat()
         })
@@ -120,7 +127,7 @@ async fn handle_requests(socket_addr: SocketAddr, routes: Vec<Route>) {
     }
 }
 
-async fn handle_request<'a>(req: Request<Body>, socket_addr: Arc<SocketAddr>, matcher: Arc<Matcher>) -> Result<Response<Body>, Error> {
+async fn handle_request<'a>(req: Request<Body>, _socket_addr: Arc<SocketAddr>, matcher: Arc<Matcher>) -> Result<Response<Body>, Error> {
     let mut req = req;
     let loc = matcher.resolve(req.uri());
 
@@ -139,11 +146,44 @@ async fn handle_request<'a>(req: Request<Body>, socket_addr: Arc<SocketAddr>, ma
         },
         // Proxy to the filesystem:
         Some(Location::FilePath(path)) => {
-            Ok(Response::new(Body::from("hello world")))
+
+            let mut file = Err(err!("File not found"));
+            let mut mime = None;
+
+            for end in &["", "index.htm", "index.html"] {
+                let mut p = path.clone();
+                if !end.is_empty() { p.push(end) }
+                mime = Some(mime_guess::guess_mime_type(&p));
+                file = await!(fs::read(p).compat()).map_err(|e| err!("{}", e));
+                if file.is_ok() { break }
+            }
+
+            let response = match file {
+                Ok(file) => {
+                    Response::builder()
+                        .status(200)
+                        .header("Content-Type", mime.unwrap().as_ref())
+                        .body(Body::from(file))
+                        .unwrap()
+                },
+                Err(e) => {
+                    let msg = format!("Weave: Could not read file '{}': {}", path.to_string_lossy(), e);
+                    Response::builder()
+                        .status(404)
+                        .body(Body::from(msg))
+                        .unwrap()
+                }
+            };
+
+            Ok(response)
         },
         // 404, not found!
         None => {
-            Ok(Response::new(Body::from("hello world")))
+            let res = Response::builder()
+                .status(404)
+                .body(Body::from("Weave: No routes matched"))
+                .unwrap();
+            Ok(res)
         }
     }
 }
