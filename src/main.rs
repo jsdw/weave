@@ -14,7 +14,7 @@ use hyper::{Client, Body, Request, Response, Server, rt};
 use hyper::service::service_fn;
 use hyper_tls::HttpsConnector;
 use tokio::fs;
-use ansi_term::Color::{ Green, Yellow, Red };
+use ansi_term::Color::{ Green, Red };
 
 // 0.3 futures and a compat layer to bridge to 0.1:
 use futures::future::{ FutureExt, TryFutureExt };
@@ -212,7 +212,7 @@ async fn handle_request<'a>(req: Request<Body>, socket_addr: Arc<SocketAddr>, ma
         let duration = before_time.elapsed();
         let status_code = resp.status().as_u16();
         let status_col = if status_code >= 200 && status_code < 300 { Green } else { Red };
-        info!("{} to {} [{}] {:#?}",
+        info!("{} to {} [{}] in {:#?}",
             src_path,
             dest.to_string(),
             status_col.paint(resp.status().as_str()),
