@@ -3,6 +3,7 @@
 #[macro_use] mod errors;
 mod routes;
 mod matcher;
+mod logging;
 
 use std::env;
 use std::collections::HashMap;
@@ -13,7 +14,7 @@ use hyper::{Client, Body, Request, Response, Server, rt};
 use hyper::service::service_fn;
 use hyper_tls::HttpsConnector;
 use tokio::fs;
-use ansi_term::Color::Red;
+use ansi_term::Color::{ Green, Yellow, Red };
 
 // 0.3 futures and a compat layer to bridge to 0.1:
 use futures::future::{ FutureExt, TryFutureExt };
@@ -22,6 +23,8 @@ use futures::compat::*;
 use routes::{ Route, Location };
 use matcher::Matcher;
 use errors::{ Error };
+
+use log::{ debug, info, warn, error };
 
 static EXAMPLES: &str = "EXAMPLES:
 
@@ -41,6 +44,16 @@ localhost:8080/bar, and content on foo.com:8080 on localhost:8080/foo.
 
 ";
 
+
+/// Catch any errors from running and report them back:
+fn main() {
+    logging::init();
+    debug!("Starting");
+    if let Err(e) = run() {
+        error!("{}", e);
+    }
+}
+
 fn run() -> Result<(), Error> {
 
     let (routes, other_args) = routes::from_args(env::args().skip(1)).map_err(|e| {
@@ -58,6 +71,11 @@ fn run() -> Result<(), Error> {
 
     if routes.is_empty() {
         return Err(err!("No routes have been provided. Use -h or --help for more information"));
+    }
+
+    // Log our routes:
+    for route in &routes {
+        info!("Routing {} to {}", route.src, route.dest);
     }
 
     // Partition provided routes based on the SocketAddr we'll serve them on:
@@ -103,7 +121,7 @@ async fn handle_requests(socket_addr: SocketAddr, routes: Vec<Route>) {
             let handler = async {
                 let res_fut = handle_request(req, socket_addr, matcher);
                 let res = await!(res_fut).unwrap_or_else(|e| {
-                    eprintln!("{}: {}", Red.paint("error"), e);
+                    warn!("Returning 500: {}", e);
                     Response::builder()
                         .status(500)
                         .body(Body::from(format!("Weave: {}", e)))
@@ -123,15 +141,19 @@ async fn handle_requests(socket_addr: SocketAddr, routes: Vec<Route>) {
         .compat();
 
     if let Err(e) = await!(server) {
-        eprintln!("{}: {}", Red.paint("error"), e);
+        error!("{}", e);
     }
 }
 
-async fn handle_request<'a>(req: Request<Body>, _socket_addr: Arc<SocketAddr>, matcher: Arc<Matcher>) -> Result<Response<Body>, Error> {
-    let mut req = req;
-    let loc = matcher.resolve(req.uri());
+async fn handle_request<'a>(req: Request<Body>, socket_addr: Arc<SocketAddr>, matcher: Arc<Matcher>) -> Result<Response<Body>, Error> {
+    let before_time = std::time::Instant::now();
 
-    match loc {
+    let mut req = req;
+
+    let src_path = format!("{}{}", socket_addr, req.uri());
+    let dest_path = matcher.resolve(req.uri());
+
+    let resp = match &dest_path {
         // Proxy to the URI our request matched against:
         Some(Location::Url(url)) => {
             // Set the request URI to our new destination:
@@ -141,8 +163,7 @@ async fn handle_request<'a>(req: Request<Body>, _socket_addr: Arc<SocketAddr>, m
             // Supoprt HTTPS (8 DNS worker threads):
             let https = HttpsConnector::new(8)?;
             // Proxy the request through and pass back the response:
-            let response = await!(Client::builder().build(https).request(req).compat())?;
-            Ok(response)
+            await!(Client::builder().build(https).request(req).compat())?
         },
         // Proxy to the filesystem:
         Some(Location::FilePath(path)) => {
@@ -175,22 +196,32 @@ async fn handle_request<'a>(req: Request<Body>, _socket_addr: Arc<SocketAddr>, m
                 }
             };
 
-            Ok(response)
+            response
         },
         // 404, not found!
         None => {
-            let res = Response::builder()
+            Response::builder()
                 .status(404)
                 .body(Body::from("Weave: No routes matched"))
-                .unwrap();
-            Ok(res)
+                .unwrap()
         }
-    }
-}
+    };
 
-/// Catch any errors from running and report them back:
-fn main() {
-    if let Err(e) = run() {
-        eprintln!("{}: {}", Red.paint("error"), e);
+    // Log duration and route details:
+    if let Some(dest) = dest_path {
+        let duration = before_time.elapsed();
+        let status_code = resp.status().as_u16();
+        let status_col = if status_code >= 200 && status_code < 300 { Green } else { Red };
+        info!("{} to {} [{}] {:#?}",
+            src_path,
+            dest.to_string(),
+            status_col.paint(resp.status().as_str()),
+            duration);
+    } else {
+        warn!("{} [{}]",
+            src_path,
+            Red.paint("no matching routes"));
     }
+
+    Ok(resp)
 }
