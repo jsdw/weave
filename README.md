@@ -22,7 +22,7 @@ Next, run these commands to download and use the correct nightly version of the 
 
 ```
 rustup toolchain install nightly-2019-05-21
-rustup default nightly-2019-05-03
+rustup default nightly-2019-05-21
 ```
 
 Finally, to install `weave` (v0.1), run the following:
@@ -76,17 +76,3 @@ Serve files in your cwd by navigating to `0.0.0.0:8080/files` and visit google b
 weave 0.0.0.0:8080/files to ./ and 0.0.0.0:8080/google to https://www.google.com
 ```
 
-# Building from source
-
-Given that `rust` has been installed, we'll need a recent nightly compiler:
-
-```
-rustup toolchain install nightly-2019-05-21
-rustup default nightly-2019-05-03
-```
-
-Then, to build with release optimisations:
-
-```
-cargo build --release
-```
