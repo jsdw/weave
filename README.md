@@ -2,10 +2,23 @@
 
 A simple CLI router. Useful if you need to wire together a few things and expose them behind a single hostname.
 
-Currently, to install `weave` you'll need to go to [https://www.rust-lang.org/tools/install](https://www.rust-lang.org/tools/install) first and install Rust. Once that's installed, you can install or upgrade the latest version of `weave` by running:
+# Installation
+
+Currently, to install `weave` you'll need to build it from source.
+
+First, go to [https://www.rust-lang.org/tools/install](https://www.rust-lang.org/tools/install) and install Rust.
+
+Next, run these commands to download and use the correct nightly version of the language:
 
 ```
-cargo install --git https://github.com/jsdw/weave.git --force
+rustup toolchain install nightly-2019-05-21
+rustup default nightly-2019-05-03
+```
+
+Finally, to install `weave` (v0.1), run the following:
+
+```
+cargo install --git https://github.com/jsdw/weave.git --tag v0.1 --force
 ```
 
 This installs the latest version of `weave` into a local `.cargo/bin` folder that the rust installation will have prompted you to add to your `$PATH`. The `--force` command overwrites any existing `weave` binary in this folder; you can ditch it if you don't want this behaviour.
