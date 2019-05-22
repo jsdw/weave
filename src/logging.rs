@@ -10,6 +10,5 @@ pub fn init() {
         .write_style(LOG_STYLE);
 
     Builder::from_env(env)
-        .default_format_timestamp(false)
         .init();
 }

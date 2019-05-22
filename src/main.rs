@@ -14,7 +14,7 @@ use hyper::{Client, Body, Request, Response, Server, rt};
 use hyper::service::service_fn;
 use hyper_tls::HttpsConnector;
 use tokio::fs;
-use ansi_term::Color::{ Green, Red };
+use ansi_term::Color::{ Green, Red, Yellow };
 
 // 0.3 futures and a compat layer to bridge to 0.1:
 use futures::future::{ FutureExt, TryFutureExt };
@@ -28,24 +28,32 @@ use log::{ debug, info, warn, error };
 
 static EXAMPLES: &str = "EXAMPLES:
 
-weave 8080 to foo.com
+Visit google by navigating to 'localhost:8080':
 
-This forwards HTTP traffic destined for localhost:8080 to foo.com.
+> weave 8080 to https://www.google.com
 
-weave 192.168.0.222:8080 to foo.com:9090
 
-This forward HTTP traffic destined for your local interface 192.168.0.222
-(port 8080) to foo.com:9090.
+Visit google by navigating to 'localhost:8080/foo':
 
-weave 8080/bar to ./foo/bar and 8080/foo to foo.com:8080
+> weave 8080/foo to https://www.google.com
 
-This serves the content on your local filesystem at ./foo/bar on
-localhost:8080/bar, and content on foo.com:8080 on localhost:8080/foo.
+
+Serve files in your cwd by navigating to '0.0.0.0:8080'
+(makes them available to anything that can see your machine):
+
+> weave 0.0.0.0:8080 to ./
+
+
+Serve files in your cwd by navigating to `0.0.0.0:8080/files`
+and visit google by navigating to `0.0.0.0:8080/google`:
+
+> weave 0.0.0.0:8080/files to ./ and \\
+>       0.0.0.0:8080/google to https://www.google.com
 
 ";
 
 
-/// Catch any errors from running and report them back:
+/// Our application entry point:
 fn main() {
     logging::init();
     debug!("Starting");
@@ -54,6 +62,7 @@ fn main() {
     }
 }
 
+/// Run the application, returning early on any synchronous errors:
 fn run() -> Result<(), Error> {
 
     let (routes, other_args) = routes::from_args(env::args().skip(1)).map_err(|e| {
@@ -120,7 +129,7 @@ async fn handle_requests(socket_addr: SocketAddr, routes: Vec<Route>) {
             let matcher = Arc::clone(&matcher);
             let handler = async {
                 let res_fut = handle_request(req, socket_addr, matcher);
-                let res = await!(res_fut).unwrap_or_else(|e| {
+                let res = res_fut.await.unwrap_or_else(|e| {
                     warn!("Returning 500: {}", e);
                     Response::builder()
                         .status(500)
@@ -140,11 +149,12 @@ async fn handle_requests(socket_addr: SocketAddr, routes: Vec<Route>) {
         .serve(make_service)
         .compat();
 
-    if let Err(e) = await!(server) {
+    if let Err(e) = server.await {
         error!("{}", e);
     }
 }
 
+/// Handle a single request, given a matcher that defines how to map from input to output:
 async fn handle_request<'a>(req: Request<Body>, socket_addr: Arc<SocketAddr>, matcher: Arc<Matcher>) -> Result<Response<Body>, Error> {
     let before_time = std::time::Instant::now();
 
@@ -163,7 +173,10 @@ async fn handle_request<'a>(req: Request<Body>, socket_addr: Arc<SocketAddr>, ma
             // Supoprt HTTPS (8 DNS worker threads):
             let https = HttpsConnector::new(8)?;
             // Proxy the request through and pass back the response:
-            await!(Client::builder().build(https).request(req).compat())?
+            Client::builder()
+                .build(https)
+                .request(req)
+                .compat().await?
         },
         // Proxy to the filesystem:
         Some(Location::FilePath(path)) => {
@@ -175,7 +188,7 @@ async fn handle_request<'a>(req: Request<Body>, socket_addr: Arc<SocketAddr>, ma
                 let mut p = path.clone();
                 if !end.is_empty() { p.push(end) }
                 mime = Some(mime_guess::guess_mime_type(&p));
-                file = await!(fs::read(p).compat()).map_err(|e| err!("{}", e));
+                file = fs::read(p).compat().map_err(|e| err!("{}", e)).await;
                 if file.is_ok() { break }
             }
 
@@ -211,16 +224,20 @@ async fn handle_request<'a>(req: Request<Body>, socket_addr: Arc<SocketAddr>, ma
     if let Some(dest) = dest_path {
         let duration = before_time.elapsed();
         let status_code = resp.status().as_u16();
-        let status_col = if status_code >= 200 && status_code < 300 { Green } else { Red };
-        info!("{} to {} [{}] in {:#?}",
+        let status_col =
+            if status_code >= 200 && status_code < 300 { Green }
+            else if status_code >= 300 && status_code < 400 { Yellow }
+            else { Red };
+
+        let info_string = format!("[{}] {} to {} in {:#?}",
+            resp.status().as_str(),
             src_path,
             dest.to_string(),
-            status_col.paint(resp.status().as_str()),
             duration);
+        info!("{}", status_col.paint(info_string));
     } else {
-        warn!("{} [{}]",
-            src_path,
-            Red.paint("no matching routes"));
+        let not_found_string = format!("[no matching routes] {}", src_path);
+        warn!("{}", Red.paint(not_found_string));
     }
 
     Ok(resp)
