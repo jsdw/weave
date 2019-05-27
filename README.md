@@ -8,7 +8,7 @@ Usage looks a bit like this:
 weave 8080 to ./client/files and 8080/api to 9090
 ```
 
-This command proxies requests to `localhost:8080/api/*` over to `localhost:9090/*`, and also serves files from `./client/files` on `localhost:8080`. For a given request, it picks the most specific match it can find fro mwhat's been given and uses that.
+This command proxies requests to `localhost:8080/api/*` over to `localhost:9090/*`, and also serves files from `./client/files` on `localhost:8080`. For a given request, it picks the most specific match it can find from what's been given and uses that.
 
 You can also specify exact routes and pattern match on parts of a route. See the examples below for more!
 
