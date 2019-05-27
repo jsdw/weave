@@ -28,7 +28,7 @@ rustup default nightly-2019-05-21
 Finally, to install `weave` (v0.1), run the following:
 
 ```
-cargo install --git https://github.com/jsdw/weave.git --tag v0.1 --force
+cargo install --git https://github.com/jsdw/weave.git --tag v0.2 --force
 ```
 
 This installs the latest version of `weave` into a local `.cargo/bin` folder that the rust installation will have prompted you to add to your `$PATH`. The `--force` command overwrites any existing `weave` binary in this folder; you can ditch it if you don't want this behaviour.
