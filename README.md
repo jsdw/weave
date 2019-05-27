@@ -115,3 +115,7 @@ Match paths ending in `/api/(filename)` and serve up JSON files from a local fol
 ```
 weave '=8080/(base..)/api/(filename)' to './files/(filename).json'
 ```
+
+# Known Issues
+
+- Untested on windows, so (at the very least) serving from file paths may not work as expected.
