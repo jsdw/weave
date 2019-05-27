@@ -1,9 +1,6 @@
-use url::Url;
-use std::str::FromStr;
-use std::path::PathBuf;
 use std::net::{ SocketAddr, ToSocketAddrs };
-use std::fmt;
 use crate::errors::{ Error };
+use crate::location::{ SrcLocation, DestLocation };
 
 /// Take some args and hand back a vector of Routes we've parsed out of them,
 /// plus an Iterator of unused args:
@@ -17,18 +14,10 @@ pub fn from_args<I: IntoIterator<Item=String>>(args: I) -> Result<(Vec<Route>, i
     let mut expects_more = false;
     while let Some(peeked) = args.peek() {
         let peeked = peeked.clone();
-        if let Ok(src) = Location::parse(&peeked) {
+        if let Ok(src) = SrcLocation::parse(&peeked) {
 
             // we've parsed more:
             expects_more = false;
-
-            // `src` needs to be a Url, not a FilePath
-            let src = match src {
-                Location::Url(url) => url,
-                Location::FilePath(path) => {
-                    return Err(err!("The location {} is not a valid route", path.to_string_lossy()))
-                }
-            };
 
             // Next arg is valid Location (we peeked), so assume
             // 'loc to loc' triplet and err if not.
@@ -52,7 +41,7 @@ pub fn from_args<I: IntoIterator<Item=String>>(args: I) -> Result<(Vec<Route>, i
             // The arg following the 'to' should be another location
             // or something is wrong:
             let dest = if let Some(dest) = args.next() {
-                Location::parse(&dest).map_err(|e| {
+                DestLocation::parse(&dest).map_err(|e| {
                     err!("Error parsing '{}': {}", dest, e)
                 })
             } else {
@@ -101,15 +90,15 @@ pub fn from_args<I: IntoIterator<Item=String>>(args: I) -> Result<(Vec<Route>, i
     Ok(( routes, args ))
 }
 
-#[derive(Debug,Clone,PartialEq,Eq)]
+#[derive(Debug,Clone,PartialEq)]
 pub struct Route {
-    pub src: Url,
-    pub dest: Location
+    pub src: SrcLocation,
+    pub dest: DestLocation
 }
 
 impl Route {
     pub fn src_socket_addr(&self) -> Result<SocketAddr, Error> {
-        let mut addrs = self.src.to_socket_addrs().map_err(|e| {
+        let mut addrs = self.src.url.to_socket_addrs().map_err(|e| {
             err!("Cannot parse socket address to listen on: {}", e)
         })?;
 
@@ -121,148 +110,16 @@ impl Route {
     }
 }
 
-
-#[derive(Debug,Clone,PartialEq,Eq)]
-pub enum Location {
-    Url(Url),
-    FilePath(PathBuf)
-}
-
-impl Location {
-    fn parse(input: impl AsRef<str>) -> Result<Location, Error> {
-        let mut s = input.as_ref().trim().to_owned();
-
-        // Starts with a '.' or '/', so will assume it's a filepath:
-        if [Some('.'), Some('/')].contains(&s.chars().next()) {
-            return Ok(Location::FilePath(s.into()));
-        }
-
-        // From here on, we assume that something like a URL
-        // has been provided..
-
-        // Starts with a port (eg `8080/foo/bar` or `:8080`)?
-        // Add a host:
-        let port_bit = {
-            let no_path = if let Some(idx) = s.find('/') {
-                &s[..idx]
-            } else {
-                &s
-            };
-            if no_path.starts_with(":") {
-                &no_path[1..]
-            } else {
-                no_path
-            }
-        };
-        if let Ok(_) = port_bit.parse::<u16>() {
-            let mut new_s = "localhost:".to_owned();
-            new_s.push_str(if s.starts_with(":") { &s[1..] } else { &s });
-            s = new_s;
-        }
-
-        // Doesn't have a scheme? Add one.
-        if let None = s.find("://") {
-            let mut new_s = "http://".to_owned();
-            new_s.push_str(&s);
-            s = new_s;
-        }
-
-        // Now, attempt to parse to a URL:
-        let url: Url = if let Ok(url) = s.parse() {
-            Ok(url)
-        } else {
-            Err(err!("Not a valid URL"))
-        }?;
-
-        // Complain if the URL scheme is wrong:
-        if !["http", "https"].contains(&url.scheme()) {
-            return Err(err!("Invalid scheme, expecting http or https only"));
-        }
-
-        Ok(Location::Url(url))
-    }
-}
-
-impl FromStr for Location {
-    type Err = Error;
-    fn from_str(input: &str) -> Result<Self, Self::Err> {
-        Location::parse(input)
-    }
-}
-
-impl fmt::Display for Location {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            Location::Url(url) => url.fmt(f),
-            Location::FilePath(path) => path.to_string_lossy().fmt(f)
-        }
-    }
-}
-
 #[cfg(test)]
 mod test {
 
+    use std::str::FromStr;
+    use url::Url;
     use super::*;
 
     fn s (s: &str) -> String { s.to_owned() }
-    fn u (u: &str) -> Location { Location::Url(Url::from_str(u).unwrap()) }
-    fn url (u: &str) -> Url { Url::from_str(u).unwrap() }
-
-    #[test]
-    fn location_can_parse_valid_urls() {
-
-        let urls = vec![
-            // Absolute filepaths are ok:
-            ("/foo/bar", Location::FilePath("/foo/bar".into())),
-            // Relative filepaths are ok:
-            ("./foo/bar", Location::FilePath("./foo/bar".into())),
-            // More Relative filepaths are ok:
-            ("../foo/bar", Location::FilePath("../foo/bar".into())),
-            // Just a port is OK
-            ("8080", u("http://localhost:8080/")),
-            // A port and path is OK
-            ("8080/foo/bar", u("http://localhost:8080/foo/bar")),
-            // Just a colon + port is OK
-            (":8080", u("http://localhost:8080/")),
-            // A colon + port and path is OK
-            (":8080/foo/bar", u("http://localhost:8080/foo/bar")),
-            // localhost is OK
-            ("localhost", u("http://localhost/")),
-            // localhost + port is ok:
-            ("http://localhost:8080", u("http://localhost:8080/")),
-            // IP + parth is ok:
-            ("http://127.0.0.1/foo", u("http://127.0.0.1/foo")),
-            // can parse IP:
-            ("http://127.0.0.1:8080/foo", u("http://127.0.0.1:8080/foo")),
-            // default scheme, valid IP addr:
-            ("127.0.0.1", u("http://127.0.0.1/")),
-            // IP + port parses:
-            ("127.0.0.1:8080", u("http://127.0.0.1:8080/")),
-            // A standard hostname missing port and scheme:
-            ("example.com", u("http://example.com/")),
-            // Spaces either side will be ignored:
-            ("  \t example.com\t \t", u("http://example.com/"))
-        ];
-
-        for (actual, expected) in urls {
-            let actual_loc: Result<Location, _> = actual.parse();
-            assert!(actual_loc.is_ok(), "Location could not be parsed: '{}', result: {:?}", actual, actual_loc);
-            assert_eq!(actual_loc.unwrap(), expected, "(Original was '{}')", actual);
-        }
-    }
-
-    #[test]
-    fn location_wont_parse_invalid_urls() {
-        let urls = vec![
-            // Don't know this protocol:
-            "foobar://example.com"
-        ];
-
-        for actual in urls {
-            let actual_loc: Result<Location, _> = actual.parse();
-            assert!(actual_loc.is_err(), "This invalid location should not have successfully parsed: {}", actual);
-        }
-    }
+    fn dest_url (u: &str) -> DestLocation { DestLocation::Url(Url::from_str(u).unwrap()) }
+    fn src_url (u: &str) -> SrcLocation { SrcLocation::parse(u).unwrap() }
 
     #[test]
     fn routes_can_be_parsed() {
@@ -282,8 +139,8 @@ mod test {
                 vec![s("8080"), s("to"), s("9090")],
                 vec![
                     Route {
-                        src: url("http://localhost:8080/"),
-                        dest: u("http://localhost:9090")
+                        src: src_url("http://localhost:8080/"),
+                        dest: dest_url("http://localhost:9090")
                     }
                 ],
                 0
@@ -292,8 +149,8 @@ mod test {
                 vec![s("8080/foo/bar"), s("to"), s("9090/foo"), s("more"), s("args")],
                 vec![
                     Route {
-                        src: url("http://localhost:8080/foo/bar"),
-                        dest: u("http://localhost:9090/foo")
+                        src: src_url("http://localhost:8080/foo/bar"),
+                        dest: dest_url("http://localhost:9090/foo")
                     }
                 ],
                 2
@@ -304,12 +161,12 @@ mod test {
                      s("more"), s("args")],
                 vec![
                     Route {
-                        src: url("http://localhost:8080/foo/bar"),
-                        dest: u("http://localhost:9090/foo")
+                        src: src_url("http://localhost:8080/foo/bar"),
+                        dest: dest_url("http://localhost:9090/foo")
                     },
                     Route {
-                        src: url("http://localhost:9091/"),
-                        dest: u("http://localhost:9090/lark")
+                        src: src_url("http://localhost:9091/"),
+                        dest: dest_url("http://localhost:9090/lark")
                     }
                 ],
                 2

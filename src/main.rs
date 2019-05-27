@@ -2,6 +2,7 @@
 
 #[macro_use] mod errors;
 mod routes;
+mod location;
 mod matcher;
 mod logging;
 
@@ -20,7 +21,8 @@ use ansi_term::Color::{ Green, Red, Yellow };
 use futures::future::{ FutureExt, TryFutureExt };
 use futures::compat::*;
 
-use routes::{ Route, Location };
+use routes::{ Route };
+use location::{ ResolvedLocation };
 use matcher::Matcher;
 use errors::{ Error };
 
@@ -44,11 +46,29 @@ Serve files in your cwd by navigating to '0.0.0.0:8080'
 > weave 0.0.0.0:8080 to ./
 
 
-Serve files in your cwd by navigating to `0.0.0.0:8080/files`
-and visit google by navigating to `0.0.0.0:8080/google`:
+Serve files in your cwd by navigating to '0.0.0.0:8080/files'
+and visit google by navigating to '0.0.0.0:8080/google':
 
 > weave 0.0.0.0:8080/files to ./ and \\
 >       0.0.0.0:8080/google to https://www.google.com
+
+
+Serve exactly 'favicon.ico' using a local file, but the rest
+of the site via 'localhost:9000':
+
+> weave =8080/favicon.ico to ./favicon.ico and 8080 to 9090
+
+
+Serve JSON files in a local folder as exactly 'api/(filename)/v1'
+to mock a simple API:
+
+> weave '=8080/api/(filename)/v1' to './files/(filename).json'
+
+
+Match paths ending in '/api/(filename)' and serve up JSON
+files from a local folder:
+
+> weave '=8080/(base..)/api/(filename)' to './files/(filename).json'
 
 ";
 
@@ -72,7 +92,7 @@ fn run() -> Result<(), Error> {
     let _ = App::new("weave")
         .author("James Wilson <james@jsdw.me>")
         .about("A lightweight HTTP router and file server.")
-        .version("0.1")
+        .version("0.2")
         .after_help(EXAMPLES)
         .usage("weave SOURCE to DEST [and SOURCE to DEST ...]")
         .setting(AppSettings::NoBinaryName)
@@ -129,17 +149,9 @@ async fn handle_requests(socket_addr: SocketAddr, routes: Vec<Route>) {
             let matcher = Arc::clone(&matcher);
             let handler = async {
                 let res_fut = handle_request(req, socket_addr, matcher);
-                let res = res_fut.await.unwrap_or_else(|e| {
-                    warn!("Returning 500: {}", e);
-                    Response::builder()
-                        .status(500)
-                        .body(Body::from(format!("Weave: {}", e)))
-                        .unwrap()
-                });
-
                 // We don't return any errors, so need to tell Rust
                 // what the error type would be:
-                Result::<_,Error>::Ok(res)
+                Result::<_,Error>::Ok(res_fut.await)
             };
             handler.boxed().compat()
         })
@@ -155,17 +167,62 @@ async fn handle_requests(socket_addr: SocketAddr, routes: Vec<Route>) {
 }
 
 /// Handle a single request, given a matcher that defines how to map from input to output:
-async fn handle_request<'a>(req: Request<Body>, socket_addr: Arc<SocketAddr>, matcher: Arc<Matcher>) -> Result<Response<Body>, Error> {
+async fn handle_request<'a>(req: Request<Body>, socket_addr: Arc<SocketAddr>, matcher: Arc<Matcher>) -> Response<Body> {
     let before_time = std::time::Instant::now();
-
-    let mut req = req;
-
     let src_path = format!("{}{}", socket_addr, req.uri());
     let dest_path = matcher.resolve(req.uri());
 
-    let resp = match &dest_path {
+    match dest_path {
+        None => {
+            let duration = before_time.elapsed();
+            let not_found_string = format!("[no matching routes] {} in {:#?}", src_path, duration);
+            warn!("{}", Red.paint(not_found_string));
+            Response::builder()
+                .status(404)
+                .body(Body::from("Weave: No routes matched"))
+                .unwrap()
+        },
+        Some(dest_path) => {
+            match do_handle_request(req, &dest_path).await {
+                Ok(resp) => {
+                    let duration = before_time.elapsed();
+                    let status_code = resp.status().as_u16();
+                    let status_col =
+                        if status_code >= 200 && status_code < 300 { Green }
+                        else if status_code >= 300 && status_code < 400 { Yellow }
+                        else { Red };
+
+                    let info_string = format!("[{}] {} to {} in {:#?}",
+                        resp.status().as_str(),
+                        src_path,
+                        dest_path.to_string(),
+                        duration);
+                    info!("{}", status_col.paint(info_string));
+                    resp
+                },
+                Err(err) => {
+                    let duration = before_time.elapsed();
+                    let error_string = format!("[500] {} to {} ({}) in {:#?}",
+                        src_path,
+                        dest_path.to_string(),
+                        err,
+                        duration);
+                    warn!("{}", Red.paint(error_string));
+                    Response::builder()
+                        .status(500)
+                        .body(Body::from(format!("Weave: {}", err)))
+                        .unwrap()
+                }
+            }
+        }
+    }
+
+}
+
+async fn do_handle_request(mut req: Request<Body>, dest_path: &ResolvedLocation) -> Result<Response<Body>, Error> {
+    match dest_path {
         // Proxy to the URI our request matched against:
-        Some(Location::Url(url)) => {
+        ResolvedLocation::Url(url) => {
             // Set the request URI to our new destination:
             *req.uri_mut() = format!("{}", url).parse().unwrap();
             // Remove the host header (it's set according to URI if not present):
@@ -173,13 +230,15 @@ async fn handle_request<'a>(req: Request<Body>, socket_addr: Arc<SocketAddr>, ma
             // Supoprt HTTPS (8 DNS worker threads):
             let https = HttpsConnector::new(8)?;
             // Proxy the request through and pass back the response:
-            Client::builder()
+            let response = Client::builder()
                 .build(https)
                 .request(req)
-                .compat().await?
+                .compat()
+                .await?;
+            Ok(response)
         },
         // Proxy to the filesystem:
-        Some(Location::FilePath(path)) => {
+        ResolvedLocation::FilePath(path) => {
 
             let mut file = Err(err!("File not found"));
             let mut mime = None;
@@ -208,37 +267,7 @@ async fn handle_request<'a>(req: Request<Body>, socket_addr: Arc<SocketAddr>, ma
                         .unwrap()
                 }
             };
-
-            response
-        },
-        // 404, not found!
-        None => {
-            Response::builder()
-                .status(404)
-                .body(Body::from("Weave: No routes matched"))
-                .unwrap()
+            Ok(response)
         }
-    };
-
-    // Log duration and route details:
-    if let Some(dest) = dest_path {
-        let duration = before_time.elapsed();
-        let status_code = resp.status().as_u16();
-        let status_col =
-            if status_code >= 200 && status_code < 300 { Green }
-            else if status_code >= 300 && status_code < 400 { Yellow }
-            else { Red };
-
-        let info_string = format!("[{}] {} to {} in {:#?}",
-            resp.status().as_str(),
-            src_path,
-            dest.to_string(),
-            duration);
-        info!("{}", status_col.paint(info_string));
-    } else {
-        let not_found_string = format!("[no matching routes] {}", src_path);
-        warn!("{}", Red.paint(not_found_string));
     }
-
-    Ok(resp)
 }

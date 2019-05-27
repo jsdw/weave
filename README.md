@@ -10,7 +10,7 @@ weave 8080 to ./client/files and 8080/api to 9090
 
 This command proxies requests to `localhost:8080/api/*` over to `localhost:9090/*`, and also serves files from `./client/files` on `localhost:8080`. For a given request, it picks the most specific match it can find fro mwhat's been given and uses that.
 
-More examples below!
+You can also specify exact routes and pattern match on parts of a route. See the examples below for more!
 
 # Installation
 
@@ -54,6 +54,26 @@ weave \
 
 Example usage to follow:
 
+# Routing
+
+## Prefix routes
+
+Basic routes like `8080/foo` will match any incoming path whose _prefix_ is the same. Thus, `8080/foo` matches requests to `/foo`, but also `/foo/bar`, `/foo/bar/wibble` and so on.
+
+## Exact routes
+
+If you'd like to match an exact path only, prefix the source route with `=`. `=8080/foo` matches requests to exactly `/foo` and nothing else.
+
+## Route patterns
+
+To match on any path fragment provided, you can declare a variable using parentheses. `8080/(foo)/bar` matches `/lark/bar`, `/wibble/bar`, `/lark/bar/foo` and so on. To force exact matching only, as above we can prefix the route with `=`. `=8080/(foo)/bar` will match `/lark/bar` and `/wibble/bar` but not `/lark/bar/foo`. Variables must be basic alphanumeric strings beginning with an ascii letter (numbers, '-' and '_' are allowed in the rest of the string).
+
+To capture as much of the route as possible, including separating `/`s, you can use a _dotdot_ variable in a path. `8080/(foo..)/bar` will match `/1/bar`, `/1/2/3/bar`, `/1/2/3/bar/4/5` and so on. Once again, prefix the route with `=` for exact matching only. `=8080/(foo..)/bar` will match `/1/bar` and `/1/2/3/bar` but not `/1/2/3/bar/4/5`.
+
+The variables declared in parentheses in these source paths can be used in the destination paths too, as you might expect. See the examples for some uses of this.
+
+You can combine uses of `(var1..)` and `(var2)`, and have multiple of each in a given route, but be aware that if there is ambiguity in which part of the route matches which variable, you cannot rely on the variabels containing what you expect.
+
 # Examples
 
 Visit google by navigating to `localhost:8080`:
@@ -76,3 +96,22 @@ Serve files in your cwd by navigating to `0.0.0.0:8080/files` and visit google b
 weave 0.0.0.0:8080/files to ./ and 0.0.0.0:8080/google to https://www.google.com
 ```
 
+Serve exactly `/favicon.ico` using a local file, but the rest of the site via `localhost:9000`:
+```
+weave =8080/favicon.ico to ./favicon.ico and 8080 to 9090
+```
+
+Match any API version provided and move it to the end of the destination path:
+```
+weave '8080/(version)/api' to '8080/api/(version)'
+```
+
+Serve JSON files in a local folder as exactly `api/(filename)/v1` to mock a simple API:
+```
+weave '=8080/api/(filename)/v1' to './files/(filename).json'
+```
+
+Match paths ending in `/api/(filename)` and serve up JSON files from a local folder:
+```
+weave '=8080/(base..)/api/(filename)' to './files/(filename).json'
+```
