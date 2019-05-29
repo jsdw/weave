@@ -1,0 +1,49 @@
+# Based on: https://github.com/japaric/trust/blob/master/.travis.yml
+language: rust
+rust:
+  - nightly
+
+env:
+  global:
+    - CRATE_NAME=weave
+
+matrix:
+  include:
+    # Mac:
+    - env: TARGET=x86_64-apple-darwin
+      os: osx
+    # Linux (MUSL):
+    - env: TARGET=x86_64-unknown-linux-musl
+      os: linux
+    # Linux (GNU):
+    - env: TARGET=x86_64-unknown-linux-gnu
+      os: linux
+
+install:
+  - export PATH="$PATH:$HOME/.cargo/bin"
+  - rustup target add $TARGET || true
+  - rustup toolchain install nightly-2019-05-21 || true
+  - rustup default nightly-2019-05-21
+
+script:
+  - cargo build --target $TARGET --verbose --release
+  - cargo test --verbose
+
+before_deploy:
+  - tar -czf weave-$TRAVIS_TAG-$TRAVIS_OS_NAME.tgz -C target/$TARGET/release/ weave
+
+deploy:
+  - provider: releases
+    file_glob: true
+    file: weave-*.tgz
+    on:
+      tags: true
+      branch: master
+    skip_cleanup: true
+    api_key:
+      secure: "A58g61amrhgVEcHb+MbMbv+aKLLqSNHuWptMkqfF1IOMrmZ1CzG3RZRlf2D6/6QlbzYWBL3shtDK+zqtqyH3oU4gh5uBRMJ9U6qXLoM2KsN7sf5egi4nhcATrfZsn5BKmVXN6B7PD3JWEde+w71uM+WbwAdl/Tyr4CbBg3mjd36YpRcV8RTlADc6lmjd+XTdwzwQC3lZq4ECN0fQh99vqYBXvHavFencma5jjL5K94/tk5Ub9qvFbJSQJsC+ZMrNo4pC+1uS6cJfdvvCe+vo4iqn9008xhAfJ34+cGPbGRH2Q1X1aB4DYUGwCHJ4chb3IHgZPFSBR2XWVS/otOwIkYpOTSnk4k7Hed2eqT4V1gVLOiyAfeDc0R3QcgrWmI3luSq9qZNU9l7VaNmXXgIV4C9WOY8N7Sea1ZNRJ4iV7/31iLwqjMVL0wuijcHfSVITSrkPoZkcG81jzQtZLs6hL4uyi+9d6pFjwYMDFPxgUZ6bYMSgZwlk5ksDjQ/uVKJP0AY6MEsK3eQFrl38N/pHAjFwRPKzg67gkyv9PeRK9WurRSMXVC1M2MZNo2cYHiNEp8oRMoGN0v+M8NgZ8sDjC2RQ3J9VWgvfRGfO7ODOxZRqKn5TcV6YEN2h1SJJRpj0jpENMsKCZXNWkqjgEgk8znPve70J8tK8jD7jGMP5pME="
+
+cache: cargo
+before_cache:
+  # Travis can't cache files that are not readable by "others"
+  - chmod -R a+r $HOME/.cargo
