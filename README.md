@@ -1,3 +1,5 @@
+![travis build status](https://travis-ci.org/jsdw/weave.svg?branch=master)
+
 # Weave
 
 A simple CLI router. Useful if you need to wire together a few things and expose them behind a single host/port.
