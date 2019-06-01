@@ -1,4 +1,4 @@
-![travis build status](https://travis-ci.org/jsdw/weave.svg?branch=master)
+[![Build Status](https://travis-ci.org/jsdw/weave.svg?branch=master)](https://travis-ci.org/jsdw/weave)
 
 # Weave
 
