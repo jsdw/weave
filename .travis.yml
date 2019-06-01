@@ -1,7 +1,12 @@
-# Based on: https://github.com/japaric/trust/blob/master/.travis.yml
+# Based on the "trust" template v0.1.2
+# https://github.com/japaric/trust/tree/v0.1.2
+
+dist: trusty
 language: rust
 rust:
-  - nightly
+  - nightly-2019-05-21
+services: docker
+sudo: required
 
 env:
   global:
@@ -9,41 +14,109 @@ env:
 
 matrix:
   include:
-    # Mac:
+    # # Android
+    # - env: TARGET=aarch64-linux-android DISABLE_TESTS=1
+    # - env: TARGET=arm-linux-androideabi DISABLE_TESTS=1
+    # - env: TARGET=armv7-linux-androideabi DISABLE_TESTS=1
+    # - env: TARGET=i686-linux-android DISABLE_TESTS=1
+    # - env: TARGET=x86_64-linux-android DISABLE_TESTS=1
+
+    # # iOS
+    # - env: TARGET=aarch64-apple-ios DISABLE_TESTS=1
+    #   os: osx
+    # - env: TARGET=armv7-apple-ios DISABLE_TESTS=1
+    #   os: osx
+    # - env: TARGET=armv7s-apple-ios DISABLE_TESTS=1
+    #   os: osx
+    # - env: TARGET=i386-apple-ios DISABLE_TESTS=1
+    #   os: osx
+    # - env: TARGET=x86_64-apple-ios DISABLE_TESTS=1
+    #   os: osx
+
+    # Linux
+    # - env: TARGET=aarch64-unknown-linux-gnu
+    # - env: TARGET=arm-unknown-linux-gnueabi
+    # - env: TARGET=armv7-unknown-linux-gnueabihf
+    # - env: TARGET=i686-unknown-linux-gnu
+    # - env: TARGET=i686-unknown-linux-musl
+    # - env: TARGET=mips-unknown-linux-gnu
+    # - env: TARGET=mips64-unknown-linux-gnuabi64
+    # - env: TARGET=mips64el-unknown-linux-gnuabi64
+    # - env: TARGET=mipsel-unknown-linux-gnu
+    # - env: TARGET=powerpc-unknown-linux-gnu
+    # - env: TARGET=powerpc64-unknown-linux-gnu
+    # - env: TARGET=powerpc64le-unknown-linux-gnu
+    # - env: TARGET=s390x-unknown-linux-gnu DISABLE_TESTS=1
+    - env: TARGET=x86_64-unknown-linux-gnu
+    - env: TARGET=x86_64-unknown-linux-musl
+
+    # OSX
+    # - env: TARGET=i686-apple-darwin
+    #   os: osx
     - env: TARGET=x86_64-apple-darwin
       os: osx
-    # Linux (MUSL):
-    - env: TARGET=x86_64-unknown-linux-musl
-      os: linux
-    # Linux (GNU):
-    - env: TARGET=x86_64-unknown-linux-gnu
-      os: linux
+
+    # # *BSD
+    # - env: TARGET=i686-unknown-freebsd DISABLE_TESTS=1
+    # - env: TARGET=x86_64-unknown-freebsd DISABLE_TESTS=1
+    # - env: TARGET=x86_64-unknown-netbsd DISABLE_TESTS=1
+
+    # # Windows
+    # - env: TARGET=x86_64-pc-windows-gnu
+
+    # Bare metal
+    # These targets don't support std and as such are likely not suitable for
+    # most crates.
+    # - env: TARGET=thumbv6m-none-eabi
+    # - env: TARGET=thumbv7em-none-eabi
+    # - env: TARGET=thumbv7em-none-eabihf
+    # - env: TARGET=thumbv7m-none-eabi
+
+    # # Testing other channels
+    # - env: TARGET=x86_64-unknown-linux-gnu
+    #   rust: nightly
+    # - env: TARGET=x86_64-apple-darwin
+    #   os: osx
+    #   rust: nightly
+
+before_install:
+  - set -e
+  - rustup self update
 
 install:
-  - export PATH="$PATH:$HOME/.cargo/bin"
-  - rustup target add $TARGET || true
-  - rustup toolchain install nightly-2019-05-21 || true
-  - rustup default nightly-2019-05-21
+  - sh ci/install.sh
+  - source ~/.cargo/env || true
 
 script:
-  - cargo build --target $TARGET --verbose --release
-  - cargo test --verbose
+  - bash ci/script.sh
+
+after_script: set +e
 
 before_deploy:
-  - tar -czf weave-$TRAVIS_TAG-$TRAVIS_OS_NAME.tgz -C target/$TARGET/release/ weave
+  - sh ci/before_deploy.sh
 
 deploy:
-  - provider: releases
-    file_glob: true
-    file: weave-*.tgz
-    on:
-      tags: true
-      branch: master
-    skip_cleanup: true
-    api_key:
-      secure: "A58g61amrhgVEcHb+MbMbv+aKLLqSNHuWptMkqfF1IOMrmZ1CzG3RZRlf2D6/6QlbzYWBL3shtDK+zqtqyH3oU4gh5uBRMJ9U6qXLoM2KsN7sf5egi4nhcATrfZsn5BKmVXN6B7PD3JWEde+w71uM+WbwAdl/Tyr4CbBg3mjd36YpRcV8RTlADc6lmjd+XTdwzwQC3lZq4ECN0fQh99vqYBXvHavFencma5jjL5K94/tk5Ub9qvFbJSQJsC+ZMrNo4pC+1uS6cJfdvvCe+vo4iqn9008xhAfJ34+cGPbGRH2Q1X1aB4DYUGwCHJ4chb3IHgZPFSBR2XWVS/otOwIkYpOTSnk4k7Hed2eqT4V1gVLOiyAfeDc0R3QcgrWmI3luSq9qZNU9l7VaNmXXgIV4C9WOY8N7Sea1ZNRJ4iV7/31iLwqjMVL0wuijcHfSVITSrkPoZkcG81jzQtZLs6hL4uyi+9d6pFjwYMDFPxgUZ6bYMSgZwlk5ksDjQ/uVKJP0AY6MEsK3eQFrl38N/pHAjFwRPKzg67gkyv9PeRK9WurRSMXVC1M2MZNo2cYHiNEp8oRMoGN0v+M8NgZ8sDjC2RQ3J9VWgvfRGfO7ODOxZRqKn5TcV6YEN2h1SJJRpj0jpENMsKCZXNWkqjgEgk8znPve70J8tK8jD7jGMP5pME="
+  api_key:
+    secure: "A58g61amrhgVEcHb+MbMbv+aKLLqSNHuWptMkqfF1IOMrmZ1CzG3RZRlf2D6/6QlbzYWBL3shtDK+zqtqyH3oU4gh5uBRMJ9U6qXLoM2KsN7sf5egi4nhcATrfZsn5BKmVXN6B7PD3JWEde+w71uM+WbwAdl/Tyr4CbBg3mjd36YpRcV8RTlADc6lmjd+XTdwzwQC3lZq4ECN0fQh99vqYBXvHavFencma5jjL5K94/tk5Ub9qvFbJSQJsC+ZMrNo4pC+1uS6cJfdvvCe+vo4iqn9008xhAfJ34+cGPbGRH2Q1X1aB4DYUGwCHJ4chb3IHgZPFSBR2XWVS/otOwIkYpOTSnk4k7Hed2eqT4V1gVLOiyAfeDc0R3QcgrWmI3luSq9qZNU9l7VaNmXXgIV4C9WOY8N7Sea1ZNRJ4iV7/31iLwqjMVL0wuijcHfSVITSrkPoZkcG81jzQtZLs6hL4uyi+9d6pFjwYMDFPxgUZ6bYMSgZwlk5ksDjQ/uVKJP0AY6MEsK3eQFrl38N/pHAjFwRPKzg67gkyv9PeRK9WurRSMXVC1M2MZNo2cYHiNEp8oRMoGN0v+M8NgZ8sDjC2RQ3J9VWgvfRGfO7ODOxZRqKn5TcV6YEN2h1SJJRpj0jpENMsKCZXNWkqjgEgk8znPve70J8tK8jD7jGMP5pME="
+  file_glob: true
+  file: $CRATE_NAME-$TRAVIS_TAG-$TARGET.*
+  on:
+    # condition: $TRAVIS_RUST_VERSION = stable
+    tags: true
+  provider: releases
+  skip_cleanup: true
 
 cache: cargo
 before_cache:
   # Travis can't cache files that are not readable by "others"
   - chmod -R a+r $HOME/.cargo
+
+branches:
+  only:
+    # release tags
+    - /^v\d+\.\d+\.\d+.*$/
+    - master
+
+notifications:
+  email:
+    on_success: never
