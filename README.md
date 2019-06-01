@@ -2,7 +2,7 @@
 
 # Weave
 
-A simple CLI router. Useful if you need to wire together a few things and expose them behind a single host/port.
+A simple CLI based HTTP router/proxy. Useful if you need to wire together a few things and expose them behind a single host/port.
 
 # Examples
 
