@@ -4,19 +4,108 @@
 
 A simple CLI router. Useful if you need to wire together a few things and expose them behind a single host/port.
 
-Usage looks a bit like this:
+# Examples
 
+Serve static files from `./client/files` on `localhost:8080`, and redirect HTTP requests starting with `localhost:8080/api` to `localhost:9090`:
 ```
 weave 8080 to ./client/files and 8080/api to 9090
+# Examples of routing given the above:
+# http://localhost:8080/api/foo => http://localhost:9090/foo
+# http://localhost:8080/api/bar/wibble => http://localhost:9090/bar/wibble
+# http://localhost:8080/ => ./client/files/index.html
+# http://localhost:8080/somefile => ./client/files/somefile
+# http://localhost:8080/path/to/somefile => ./client/files/path/to/somefile
 ```
 
-This command proxies requests to `localhost:8080/api/*` over to `localhost:9090/*`, and also serves files from `./client/files` on `localhost:8080`. For a given request, it picks the most specific match it can find from what's been given and uses that.
+Visit google by navigating to `localhost:8080`:
+```
+weave 8080 to https://www.google.com
+# Examples of routing given the above:
+# http://localhost:8080/ => https://www.google.com/
+# http://localhost:8080/favicon.ico => https://www.google.com/favicon.ico
+# http://localhost:8080/favicon.ico/bar => https://www.google.com/favicon.ico/bar
+```
 
-You can also specify exact routes and pattern match on parts of a route. See the examples below for more!
+Visit google by navigating to `localhost:8080/foo`:
+```
+weave 8080/foo to https://www.google.com
+# Examples of routing given the above:
+# http://localhost:8080/ => No route matches this
+# http://localhost:8080/foo => https://www.google.com
+# http://localhost:8080/foo/favicon.ico => https://www.google.com/favicon.ico
+```
+
+Serve files in your cwd by navigating to `0.0.0.0:8080` (makes them available to anything that can see your machine):
+```
+weave 0.0.0.0:8080 to ./
+# Examples of routing given the above:
+# http://0.0.0.0:8080/ => ./index.html
+# http://0.0.0.0:8080/somefile => ./somefile
+# http://0.0.0.0:8080/path/to/somefile => ./path/to/somefile
+```
+
+Serve exactly `/favicon.ico` using a local file, but the rest of the site via `localhost:9000`:
+```
+weave =8080/favicon.ico to ./favicon.ico and 8080 to 9090
+# Examples of routing given the above:
+# http://localhost:8080/ => http://localhost:9090
+# http://localhost:8080/favicon.ico => ./favicon.ico
+# http://localhost:8080/favicon.ico/bar => http://localhost:9090/favicon.ico/bar
+```
+
+Match any API version provided and move it to the end of the destination path:
+```
+weave '8080/(version)/api' to 'https://some.site/api/(version)'
+# Examples of routing given the above:
+# http://localhost:8080/v1/api => https://some.site/api/v1
+# http://localhost:8080/v1/api/foo => https://some.site/api/v1/foo
+# http://localhost:8080/wibble/api/foo => https://some.site/api/wibble/foo
+```
+
+Serve JSON files in a local folder as exactly `api/(filename)/v1` to mock a simple API:
+```
+weave '=8080/api/(filename)/v1' to './files/(filename).json'
+# Examples of routing given the above:
+# http://localhost:8080/api/foo/v1 => ./files/foo.json
+# http://localhost:8080/api/bar/v1 => ./files/bar.json
+# http://localhost:8080/api/bar/v1/wibble => No route matches this
+```
+
+Match paths ending in `/api/(filename)` and serve up JSON files from a local folder:
+```
+weave '=8080/(base..)/api/(filename)' to './files/(filename).json'
+# Examples of routing given the above:
+# http://localhost:8080/1/2/3/api/foo => ./files/foo.json
+# http://localhost:8080/wibble/api/foo => ./files/foo.json
+# http://localhost:8080/bar/api/foo => ./files/foo.json
+# http://localhost:8080/api/foo => No route matches this
+```
+
+`and` can be used to serve any number of routes simultaneously. Keep reading for more information on the different types of routes, and how they are prioritised.
 
 # Installation
 
-Currently, to install `weave` you'll need to build it from source.
+## From pre-built binaries
+
+Prebuilt compressed binaries are available [here](https://github.com/jsdw/weave/releases/latest). Download the compressed `.tar.gz` file for your OS/architecture and decompress it (on MacOS, this is automatic if you double-click the downloaded file).
+
+If you like, you can download and decompress the latest release on the commandline. On **MacOS**, run:
+
+```
+curl -L https://github.com/jsdw/weave/releases/download/v0.2.1/weave-v0.2.1-x86_64-apple-darwin.tar.gz | tar -xz
+```
+
+For **Linux**, run:
+
+```
+curl -L https://github.com/jsdw/weave/releases/download/v0.2.1/weave-v0.2.1-x86_64-unknown-linux-musl.tar.gz | tar -xz
+```
+
+In either case, you'll end up with a `weave` binary in your current folder. The examples assume that you have placed this into your `$PATH` so that it can be called from anywhere.
+
+## From source
+
+Alternately, you can compile `weave` from source.
 
 First, go to [https://www.rust-lang.org/tools/install](https://www.rust-lang.org/tools/install) and install Rust.
 
@@ -27,36 +116,15 @@ rustup toolchain install nightly-2019-05-21
 rustup default nightly-2019-05-21
 ```
 
-Finally, to install `weave` (v0.1), run the following:
+Finally, to install a release of `weave` (here, v0.2.1), run the following:
 
 ```
-cargo install --git https://github.com/jsdw/weave.git --tag v0.2 --force
+cargo install --git https://github.com/jsdw/weave.git --tag v0.2.1 --force
 ```
 
 This installs the latest version of `weave` into a local `.cargo/bin` folder that the rust installation will have prompted you to add to your `$PATH`. The `--force` command overwrites any existing `weave` binary in this folder; you can ditch it if you don't want this behaviour.
 
-# Motivation
-
-## Throwing together client code and some API you've been hacking on
-
-One motivating example is that you have built some static HTML/JavaScript, and separately want to start hacking on an API that it can talk to. You might serve your static files on `localhost:8080` to view them using something like `php -S`, but where do you serve the API so that the static content can make requests to it when loaded into a browser (without hitting cross origin restrictions)?
-
-Using `weave`, you'd just start your API server up on, say, port 9090, and then `weave 8080 to ./client/files and 8080/api to 9090` to merge the client and API under one hostname, `localhost:8080`. Now, when somebody navigates to `localhost:8080`, `index.html` is loaded,and that can talk to `/api/foo` to communicate with your API server.
-
-## Merging several APIs under one unified interface
-
-Taking the above example a step further, perhaps you have some client code that you want to be able to communicate with several small APIs that are under your control (perhaps you're building a dashboard, for instance). To get stuck in quickly, you may want to avoid writing your own server that can proxy requests to the various endpoints, and use `weave` to throw together a common interface that your client code can talk to:
-
-```
-weave \
-    8080/api/stats to 10.10.0.21:9091/api/get_stats and \
-    8080/api/build_failures to internal.system/get_build_failures and \
-    8080 to ./client/file/dir/
-```
-
-Example usage to follow:
-
-# Routing
+# More Information on routing
 
 ## Prefix routes
 
@@ -76,47 +144,18 @@ The variables declared in parentheses in these source paths can be used in the d
 
 You can combine uses of `(var1..)` and `(var2)`, and have multiple of each in a given route, but be aware that if there is ambiguity in which part of the route matches which variable, you cannot rely on the variabels containing what you expect.
 
-# Examples
+## Route ordering
 
-Visit google by navigating to `localhost:8080`:
-```
-weave 8080 to https://www.google.com
-```
+If you combine multiple routes using `and`, they will be sorted in this order:
 
-Visit google by navigating to `localhost:8080/foo`:
-```
-weave 8080/foo to https://www.google.com
-```
+1. Exact match routes
+2. Exact match routes with route patterns
+3. Prefix routes
+4. Prefix routes with route patterns
 
-Serve files in your cwd by navigating to `0.0.0.0:8080` (makes them available to anything that can see your machine):
-```
-weave 0.0.0.0:8080 to ./
-```
+Within these groups, exact match routes and prefix routes are then sorted longest (most specific) first. routes with route patterns are sorted by the order in which they were declared.
 
-Serve files in your cwd by navigating to `0.0.0.0:8080/files` and visit google by navigating to `0.0.0.0:8080/google`:
-```
-weave 0.0.0.0:8080/files to ./ and 0.0.0.0:8080/google to https://www.google.com
-```
-
-Serve exactly `/favicon.ico` using a local file, but the rest of the site via `localhost:9000`:
-```
-weave =8080/favicon.ico to ./favicon.ico and 8080 to 9090
-```
-
-Match any API version provided and move it to the end of the destination path:
-```
-weave '8080/(version)/api' to '8080/api/(version)'
-```
-
-Serve JSON files in a local folder as exactly `api/(filename)/v1` to mock a simple API:
-```
-weave '=8080/api/(filename)/v1' to './files/(filename).json'
-```
-
-Match paths ending in `/api/(filename)` and serve up JSON files from a local folder:
-```
-weave '=8080/(base..)/api/(filename)' to './files/(filename).json'
-```
+When matching an incoming request, the first route that matches wins, and the request is redirected to the destination given with that route. This should generally lead to requests being redirected as you would expect; more specific matches will tend to win over less specific matches.
 
 # Known Issues
 
