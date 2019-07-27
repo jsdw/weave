@@ -11,15 +11,12 @@ use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use clap::{ App, AppSettings };
-use hyper::{Client, Body, Request, Response, Server, rt};
-use hyper::service::service_fn;
+use hyper::{ Client, Body, Request, Response, Server };
+use hyper::service::{ service_fn, make_service_fn };
 use hyper_tls::HttpsConnector;
-use tokio::fs;
+use tokio::{ self, fs };
 use ansi_term::Color::{ Green, Red, Yellow };
-
-// 0.3 futures and a compat layer to bridge to 0.1:
-use futures::future::{ FutureExt, TryFutureExt };
-use futures::compat::*;
+use futures_util::future::join_all;
 
 use routes::{ Route };
 use location::{ ResolvedLocation };
@@ -116,16 +113,17 @@ weave '=8080/(base..)/api/(filename)' to './files/(filename).json'
 
 
 /// Our application entry point:
-fn main() {
+#[tokio::main]
+async fn main() {
     logging::init();
     debug!("Starting");
-    if let Err(e) = run() {
+    if let Err(e) = run().await {
         error!("{}", e);
     }
 }
 
 /// Run the application, returning early on any synchronous errors:
-fn run() -> Result<(), Error> {
+async fn run() -> Result<(), Error> {
 
     let (routes, other_args) = routes::from_args(env::args().skip(1)).map_err(|e| {
         err!("failed to parse routes: {}", e)
@@ -150,27 +148,20 @@ fn run() -> Result<(), Error> {
     }
 
     // Partition provided routes based on the SocketAddr we'll serve them on:
-    let mut map = HashMap::new();
+    let mut route_map = HashMap::new();
     for route in routes {
         let socket_addr = route.src_socket_addr()?;
-        let rs: &mut Vec<Route> = map.entry(socket_addr).or_default();
+        let rs: &mut Vec<Route> = route_map.entry(socket_addr).or_default();
         rs.push(route);
     }
 
-    // Spawn a server on each SocketAddr to handle incoming requests:
-    let server = async {
-        for (socket_addr, routes) in map {
-            let handler = handle_requests(socket_addr, routes)
-                .unit_error()
-                .boxed()
-                .compat();
-            rt::spawn(handler);
-        }
-        Ok(())
-    };
+    // Map each addr+route pair into a future that will handle requests:
+    let servers = route_map.into_iter().map(|(socket_addr, routes)| {
+        handle_requests(socket_addr, routes)
+    });
 
-    // Kick off these async things:
-    hyper::rt::run(server.boxed().compat());
+    // Wait for these to finish (shouldn't happe unless they all fail):
+    join_all(servers).await;
     Ok(())
 }
 
@@ -181,27 +172,25 @@ async fn handle_requests(socket_addr: SocketAddr, routes: Vec<Route>) {
 
     let matcher = Arc::new(Matcher::new(routes));
     let socket_addr = Arc::new(socket_addr);
-
-    let make_service = move || {
+    let make_service = make_service_fn(move |_| {
         let socket_addr = Arc::clone(&socket_addr);
         let matcher = Arc::clone(&matcher);
-
-        service_fn(move |req| {
+        let svc = Ok::<_,Error>(service_fn(move |req| {
             let socket_addr = Arc::clone(&socket_addr);
             let matcher = Arc::clone(&matcher);
-            let handler = async {
-                let res_fut = handle_request(req, socket_addr, matcher);
+            async move {
+                let res = handle_request(req, &socket_addr, &matcher).await;
                 // We don't return any errors, so need to tell Rust
                 // what the error type would be:
-                Result::<_,Error>::Ok(res_fut.await)
-            };
-            handler.boxed().compat()
-        })
-    };
+                Result::<_,Error>::Ok(res)
+            }
+        }));
 
-    let server = Server::bind(&socket_addr_outer)
-        .serve(make_service)
-        .compat();
+        // Return a Future:
+        async { svc }
+    });
+
+    let server = Server::bind(&socket_addr_outer).serve(make_service);
 
     if let Err(e) = server.await {
         error!("{}", e);
@@ -209,7 +198,7 @@ async fn handle_requests(socket_addr: SocketAddr, routes: Vec<Route>) {
 }
 
 /// Handle a single request, given a matcher that defines how to map from input to output:
-async fn handle_request<'a>(req: Request<Body>, socket_addr: Arc<SocketAddr>, matcher: Arc<Matcher>) -> Response<Body> {
+async fn handle_request(req: Request<Body>, socket_addr: &SocketAddr, matcher: &Matcher) -> Response<Body> {
     let before_time = std::time::Instant::now();
     let src_path = format!("{}{}", socket_addr, req.uri());
     let dest_path = matcher.resolve(req.uri());
@@ -275,7 +264,6 @@ async fn do_handle_request(mut req: Request<Body>, dest_path: &ResolvedLocation)
             let response = Client::builder()
                 .build(https)
                 .request(req)
-                .compat()
                 .await?;
             Ok(response)
         },
@@ -289,7 +277,7 @@ async fn do_handle_request(mut req: Request<Body>, dest_path: &ResolvedLocation)
                 let mut p = path.clone();
                 if !end.is_empty() { p.push(end) }
                 mime = Some(mime_guess::guess_mime_type(&p));
-                file = fs::read(p).compat().map_err(|e| err!("{}", e)).await;
+                file = fs::read(p).await.map_err(|e| err!("{}", e));
                 if file.is_ok() { break }
             }
 

@@ -112,8 +112,8 @@ First, go to [https://www.rust-lang.org/tools/install](https://www.rust-lang.org
 Next, run these commands to download and use the correct nightly version of the language:
 
 ```
-rustup toolchain install nightly-2019-05-21
-rustup default nightly-2019-05-21
+rustup toolchain install nightly-2019-07-26
+rustup default nightly-2019-07-26
 ```
 
 Finally, to install a release of `weave` (here, v0.2.1), run the following:

@@ -5,14 +5,14 @@ authors = ["James Wilson <james@jsdw.me>"]
 edition = "2018"
 
 [dependencies]
-hyper = "0.12.28"
-hyper-tls = "0.3.2"
+hyper = { git = "https://github.com/hyperium/hyper" }
+hyper-tls = { git = "https://github.com/hyperium/hyper-tls" }
+tokio = { git = "https://github.com/tokio-rs/tokio" }
+futures-util-preview = "0.3.0-alpha.17"
 mime_guess = "2.0.0-alpha.6"
-tokio = "0.1.19"
-clap = "~2.33.0"
+clap = "2.33.0"
 url = "1.7.2"
 ansi_term = "0.11.0"
-futures-preview = { version = "0.3.0-alpha.15", features = ["compat"] }
 env_logger = "0.6.1"
 log = "0.4.0"
 regex = "1"

@@ -1,3 +1,11 @@
+# 0.2.2
+
+- Remove future compat things and migrate fully to `std::Future`s
+
+# 0.2.1
+
+- Update README and examples in binary
+
 # 0.2
 
 ## Additions
