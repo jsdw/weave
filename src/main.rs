@@ -160,7 +160,7 @@ async fn run() -> Result<(), Error> {
         handle_requests(socket_addr, routes)
     });
 
-    // Wait for these to finish (shouldn't happe unless they all fail):
+    // Wait for these to finish (shouldn't happen unless they all fail):
     join_all(servers).await;
     Ok(())
 }
@@ -168,15 +168,10 @@ async fn run() -> Result<(), Error> {
 /// Handle incoming requests by matching on routes and dispatching as necessary
 async fn handle_requests(socket_addr: SocketAddr, routes: Vec<Route>) {
 
-    let socket_addr_outer = socket_addr.clone();
-
     let matcher = Arc::new(Matcher::new(routes));
-    let socket_addr = Arc::new(socket_addr);
     let make_service = make_service_fn(move |_| {
-        let socket_addr = Arc::clone(&socket_addr);
         let matcher = Arc::clone(&matcher);
         let svc = Ok::<_,Error>(service_fn(move |req| {
-            let socket_addr = Arc::clone(&socket_addr);
             let matcher = Arc::clone(&matcher);
             async move {
                 let res = handle_request(req, &socket_addr, &matcher).await;
@@ -190,8 +185,7 @@ async fn handle_requests(socket_addr: SocketAddr, routes: Vec<Route>) {
         async { svc }
     });
 
-    let server = Server::bind(&socket_addr_outer).serve(make_service);
-
+    let server = Server::bind(&socket_addr).serve(make_service);
     if let Err(e) = server.await {
         error!("{}", e);
     }

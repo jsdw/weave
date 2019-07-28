@@ -1,6 +1,6 @@
 [package]
 name = "weave"
-version = "0.2.0"
+version = "0.2.2"
 authors = ["James Wilson <james@jsdw.me>"]
 edition = "2018"
 
