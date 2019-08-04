@@ -1,4 +1,4 @@
-use std::net::{ SocketAddr, ToSocketAddrs };
+use std::net::{ SocketAddr };
 use crate::errors::{ Error };
 use crate::location::{ SrcLocation, DestLocation };
 

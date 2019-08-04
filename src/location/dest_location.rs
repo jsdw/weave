@@ -1,6 +1,4 @@
 use url::Url;
-use regex::Regex;
-use lazy_static::lazy_static;
 use std::str::FromStr;
 use std::path::{ self, PathBuf };
 use std::fmt;

@@ -2,10 +2,8 @@ use url::Host;
 use regex::Regex;
 use lazy_static::lazy_static;
 use std::str::FromStr;
-use std::path::{ self, PathBuf };
 use std::fmt;
 use std::net::{ SocketAddr, ToSocketAddrs };
-use std::borrow::Cow;
 use crate::errors::{ Error };
 
 /// A source location. It should be something that looks a little
@@ -13,12 +11,12 @@ use crate::errors::{ Error };
 /// what path to match on incoming requests if any.
 #[derive(Debug,Clone)]
 pub struct SrcLocation {
-    /// The original location:
-    original: String,
     /// Host:
     host: Host<String>,
     /// Port:
     port: u16,
+    /// Raw path as entered, for display purposes:
+    path: String,
     /// Match on paths using this regex:
     path_regex: Regex,
     /// Do we want this to be for exact matches only?
@@ -28,7 +26,7 @@ pub struct SrcLocation {
 }
 
 impl SrcLocation {
-    pub fn parse(original: String) -> Result<SrcLocation, Error> {
+    pub fn parse(original: impl AsRef<str>) -> Result<SrcLocation, Error> {
 
         lazy_static!{
             // Are we matching on parts of the path? (.*?) is a non greedy match, to match as little
@@ -36,45 +34,54 @@ impl SrcLocation {
             static ref HOST_AND_PORT_RE: Regex = Regex::new(r"^(.*):([0-9]+)$").expect("host_and_port_re");
         }
 
-        let input: &str = &*original;
+        let input: &str = original.as_ref();
 
+        // Does the input begin with "="? Exact matches only if it does
         let (exact, input) = if input.starts_with('=') {
             (true, &input[1..])
         } else {
             (false, input)
         };
 
+        // Did we specify an input protocol? It should be nothing or http
         let (protocol, input) = if let Some(n) = input.find("://") {
             (&input[0..n], &input[n+3..])
         } else {
             ("http", input)
         };
-
         if protocol != "http" {
             return Err(err!("Incalid protocol: expected 'http'"))
         }
 
+        //  Let's find the host:port bit of the input..
         let (host_and_port, input) = if let Some(n) = input.find("/") {
             (&input[0..n], &input[n..])
         } else {
             (input, "")
         };
 
+        // And then turn that into a host string and port number
         let (host, port) = if let Some(caps) = HOST_AND_PORT_RE.captures(host_and_port) {
-            let mut host = caps.get(1).unwrap().as_str();
-            if host.is_empty() { host = "localhost" }
+            let host = caps.get(1).unwrap().as_str();
             let port = caps.get(2).unwrap().as_str().parse().unwrap();
             (host, port)
+        } else if let Ok(n) = host_and_port.parse() {
+            ("localhost", n)
         } else {
-            (input, 80)
+            (host_and_port, 80)
         };
 
-        let host = Host::parse(host)?;
-        let (has_patterns, path_regex) = convert_path_to_regex(input, exact);
+        // host default to localhost if not provided:
+        let host = Host::parse(if host.is_empty() { "localhost" } else { host })?;
+        // path should always begin with "/":
+        let path = if input.starts_with("/") { input.to_owned() } else { format!("/{}", input) };
+        // turn the path into a regex to match requests on:
+        let (has_patterns, path_regex) = convert_path_to_regex(&path, exact);
 
+        // and hand this all back:
         Ok(SrcLocation {
-            original,
             host,
+            path,
             port,
             path_regex,
             exact,
@@ -99,7 +106,7 @@ impl SrcLocation {
             Host::Ipv6(addr) => Ok(SocketAddr::from((addr,self.port))),
             Host::Domain(ref s) => {
                 // This does a potentially blocking lookup.
-                let mut addrs = s.to_socket_addrs().map_err(|e| {
+                let mut addrs = (&**s, self.port).to_socket_addrs().map_err(|e| {
                     err!("Cannot parse socket address to listen on: {}", e)
                 })?;
 
@@ -115,7 +122,11 @@ impl SrcLocation {
 
 impl PartialEq for SrcLocation {
     fn eq(&self, other: &Self) -> bool {
-        self.original == other.original
+        self.host == other.host &&
+        self.port == other.port &&
+        self.exact == other.exact &&
+        self.has_patterns == other.has_patterns &&
+        self.path_regex.as_str() == other.path_regex.as_str()
     }
 }
 
@@ -128,7 +139,8 @@ impl FromStr for SrcLocation {
 
 impl fmt::Display for SrcLocation {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        self.original.fmt(f)
+        let host = if self.port == 80 { format!("{}",self.host) } else { format!("{}:{}", self.host, self.port) };
+        write!(f, "{}{}", host, self.path)
     }
 }
 

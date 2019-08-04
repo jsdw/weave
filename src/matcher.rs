@@ -166,7 +166,7 @@ mod test {
     use hyper::Uri;
     use url::Url;
     use std::path::PathBuf;
-    use crate::location::{ SrcLocation, DestLocation };
+    use crate::location::{ DestLocation };
 
     use super::*;
 
