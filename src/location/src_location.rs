@@ -71,17 +71,23 @@ impl SrcLocation {
             (host_and_port, 80)
         };
 
-        // host default to localhost if not provided:
+        // Path should always begin with "/":
+        let path_and_query = if input.starts_with("/") { input.to_owned() } else { format!("/{}", input) };
+        let (path, _query) = split_path_and_query(&path_and_query);
+
+        // Host default to localhost if not provided:
         let host = Host::parse(if host.is_empty() { "localhost" } else { host })?;
-        // path should always begin with "/":
-        let path = if input.starts_with("/") { input.to_owned() } else { format!("/{}", input) };
-        // turn the path into a regex to match requests on:
-        let (has_patterns, path_regex) = convert_path_to_regex(&path, exact);
+        // Parse path_and_query into pieces to build a regex from:
+        let path_pieces = parse_path(path);
+        // Did we find any patterns?
+        let has_patterns = path_pieces.iter().any(|p| if let PathPiece::Pattern{..} = p { true } else { false });
+        // Make the regex:
+        let path_regex = convert_path_pieces_to_regex(path_pieces, exact);
 
         // and hand this all back:
         Ok(SrcLocation {
             host,
-            path,
+            path: path.to_owned(),
             port,
             path_regex,
             exact,
@@ -144,42 +150,89 @@ impl fmt::Display for SrcLocation {
     }
 }
 
-/// Convert a path into something that matches incoming paths, and return
-/// whether or not any pattern matching is used at all.
-fn convert_path_to_regex(path: &str, exact: bool) -> (bool,Regex) {
+/// Split path_and_query into separate path and query pieces, noting that a '?' can appear
+/// inside a pattern and refusing to match on that.
+fn split_path_and_query(path_and_query: &str) -> (&str, &str) {
+    lazy_static!{
+        static ref QUERY_PARAMS_RE: Regex = Regex::new(r"\?([^)]|$)").expect("query_params_re");
+    }
+
+    // Split on '?' if exists outside of a match point.
+    // @TODO: Do something useful with query params.
+    if let Some(m) = QUERY_PARAMS_RE.find(path_and_query) {
+        let n = m.start();
+        (&path_and_query[0..n], &path_and_query[n+1..])
+    } else {
+        (path_and_query, "")
+    }
+}
+
+/// Parse a path into pieces containing either raw strings or patterns to match on:
+fn parse_path(path: &str) -> Vec<PathPiece> {
     lazy_static!{
         // Are we matching on parts of the path? (.*?) is a non greedy match, to match as little
         // as possible, which is necessary to support multiple match patterns.
-        static ref MATCH_POINT_RE: Regex = Regex::new(r"(.*?)\(([a-zA-Z][a-zA-Z0-9_-]*)(\.\.)?\)").expect("match_point_re");
+        static ref MATCH_POINT_RE: Regex = Regex::new(r"(.*?)(\(([a-zA-Z][a-zA-Z0-9_-]*)(\.\.)?\))").expect("match_point_re");
     }
 
-    let mut has_matches = false;
-    let mut re_expr: String = String::new();
+    // Next, find the patterns in our path:
     let mut last_idx = 0;
+    let mut path_pieces = vec![];
+    for cap in MATCH_POINT_RE.captures_iter(path) {
+
+        let path_str = cap.get(1).unwrap().as_str();
+        let all_pattern = cap.get(2).unwrap();
+        let name = cap.get(3).unwrap().as_str();
+        let greedy = cap.get(4).is_some();
+
+        if !path_str.is_empty() {
+            path_pieces.push(PathPiece::Str(path_str))
+        }
+        path_pieces.push(PathPiece::Pattern {
+            name,
+            greedy
+        });
+        last_idx = all_pattern.end();
+    }
+
+    // Consume the rest of the string:
+    path_pieces.push(PathPiece::Str(&path[last_idx..]));
+
+    path_pieces
+}
+enum PathPiece<'a> {
+    Str(&'a str),
+    Pattern{
+        name: &'a str,
+        greedy: bool
+    }
+}
+
+/// Convert a path into something that matches incoming paths, and return
+/// whether or not any pattern matching is used at all.
+fn convert_path_pieces_to_regex(path_pieces: Vec<PathPiece>, exact: bool) -> Regex {
+
+    let mut re_expr: String = String::new();
+
+    // A selection of regexps to match different pattern flavours:
+    static GREEDY: &str = "(?P<{}>.+?)";
+    static NONGREEDY: &str = "(?P<{}>[^/]+)";
 
     // Assemble a regex string if we find matchers:
-    for cap in MATCH_POINT_RE.captures_iter(path) {
-        has_matches = true;
-        last_idx = cap.get(0).unwrap().end();
-
-        let raw = cap.get(1).unwrap().as_str();
-        let match_name = cap.get(2).unwrap().as_str();
-        let match_all = cap.get(3);
-
-        re_expr.push_str(&regex::escape(raw));
-
-        if match_all.is_some() {
-            // If '..' put after name, non-greedily match as much as we
-            // can (but allow subsequent captures to capture their bits too):
-            re_expr.push_str(&format!("(?P<{}>.+?)", match_name));
-        } else {
-            // Else, match everything to the next '/':
-            re_expr.push_str(&format!("(?P<{}>[^/]+)", match_name));
+    for piece in path_pieces {
+        match piece {
+            PathPiece::Str(s) => {
+                re_expr.push_str(&regex::escape(s));
+            },
+            PathPiece::Pattern{ name, greedy } => {
+                let re_str = match greedy {
+                    true    => GREEDY,
+                    false    => NONGREEDY,
+                };
+                re_expr.push_str(&re_str.replace("{}", name));
+            }
         }
     }
-
-    // push end of string onto regex:
-    re_expr.push_str(&regex::escape(&path[last_idx..]));
 
     // Allow trailing chars if not exact, else prohibit:
     let regex_string = if exact {
@@ -188,5 +241,5 @@ fn convert_path_to_regex(path: &str, exact: bool) -> (bool,Regex) {
         format!("^{}", re_expr)
     };
 
-    (has_matches, Regex::new(&regex_string).expect("invalid convert regex built up"))
+    Regex::new(&regex_string).expect("invalid convert regex built up")
 }
