@@ -23,8 +23,8 @@ impl Matcher {
         // 4. regex prefix (in order declared)
         routes.sort_by(|a, b| {
             // Put all exact matching routes first:
-            a.src.exact.cmp(&b.src.exact).reverse().then_with(|| {
-                match (a.src.path_regex.is_some(), b.src.path_regex.is_some()) {
+            a.src.is_exact().cmp(&b.src.is_exact()).reverse().then_with(|| {
+                match (a.src.has_patterns(), b.src.has_patterns()) {
                     // If regex, put that last, but maintain
                     // ordering within regex'd paths:
                     (true, true)   => Ordering::Equal,
@@ -33,8 +33,8 @@ impl Matcher {
                     // If neither is regex, reverse sort based on path length
                     // to put longer paths first:
                     (false, false) => {
-                        a.src.url.path().len()
-                            .cmp(&b.src.url.path().len())
+                        a.src.path_len()
+                            .cmp(&b.src.path_len())
                             .reverse()
                     }
                 }
@@ -54,36 +54,19 @@ impl Matcher {
 
 fn resolve_route(uri: &Uri, route: &Route) -> Option<ResolvedLocation> {
     let path = uri.path();
+    let re = route.src.path_regex();
 
     // Attempt to match on provided regex:
-    if let Some(re) = &route.src.path_regex {
-        let re_captures = re.captures(path);
-        if let Some(captures) = re_captures {
-            let rest_of_path = &path[ captures.get(0).unwrap().end().. ];
-            Some(match route.dest.clone() {
-                DestLocation::Url(url) => {
-                    let expanded_url = expand_url_with_captures(&captures, url);
-                    ResolvedLocation::Url(merge_tail_and_uri_with_url(rest_of_path, uri, expanded_url))
-                },
-                DestLocation::FilePath(path) => {
-                    let expanded_path = expand_path_with_captures(&captures, path);
-                    ResolvedLocation::FilePath(merge_tail_with_path(rest_of_path, expanded_path))
-                }
-            })
-        } else {
-            None
-        }
-    }
-    // No regex, so see whether incoming path starts with route src:
-    else if (route.src.exact && path == route.src.url.path())
-            || (!route.src.exact && path.starts_with(route.src.url.path())) {
-        let rest_of_path = &path[ route.src.url.path().len().. ];
+    if let Some(captures) = re.captures(path) {
+        let rest_of_path = &path[ captures.get(0).unwrap().end().. ];
         Some(match route.dest.clone() {
             DestLocation::Url(url) => {
-                ResolvedLocation::Url(merge_tail_and_uri_with_url(rest_of_path, uri, url))
+                let expanded_url = expand_url_with_captures(&captures, url);
+                ResolvedLocation::Url(merge_tail_and_uri_with_url(rest_of_path, uri, expanded_url))
             },
-            DestLocation::FilePath(filepath) => {
-                ResolvedLocation::FilePath(merge_tail_with_path(rest_of_path, filepath.into()))
+            DestLocation::FilePath(path) => {
+                let expanded_path = expand_path_with_captures(&captures, path);
+                ResolvedLocation::FilePath(merge_tail_with_path(rest_of_path, expanded_path))
             }
         })
     }
@@ -240,14 +223,14 @@ mod test {
     fn exact_prefix_means_exact() {
         let routes = vec![
             Route {
-                src: SrcLocation::parse("=8080/foo/bar").unwrap(),
+                src: "=8080/foo/bar".parse().unwrap(),
                 dest: DestLocation::parse("9090/1").unwrap()
             },
             // This path is longer, and so can accidentally be sorted
             // before the above if path length is taken into account
             // when it shouldn't be:
             Route {
-                src: SrcLocation::parse("=8080/favicon.ico").unwrap(),
+                src: "=8080/favicon.ico".parse().unwrap(),
                 dest: DestLocation::parse("9090/2").unwrap()
             }
         ];
@@ -273,19 +256,19 @@ mod test {
     fn dont_add_trailing_slash_to_exact_match() {
         let routes = vec![
             Route {
-                src: SrcLocation::parse("8080/hello/bar").unwrap(),
+                src: "8080/hello/bar".parse().unwrap(),
                 dest: DestLocation::parse("9090/wibble/bar").unwrap()
             },
             Route {
-                src: SrcLocation::parse("8080/hello/bar.json").unwrap(),
+                src: "8080/hello/bar.json".parse().unwrap(),
                 dest: DestLocation::parse("9090/wibble/bar.json").unwrap()
             },
             Route {
-                src: SrcLocation::parse("=8080/hello/wibble").unwrap(),
+                src: "=8080/hello/wibble".parse().unwrap(),
                 dest: DestLocation::parse("9090/hi/wibble").unwrap()
             },
             Route {
-                src: SrcLocation::parse("=8080/hello/wibble.json").unwrap(),
+                src: "=8080/hello/wibble.json".parse().unwrap(),
                 dest: DestLocation::parse("9090/hi/wibble.json").unwrap()
             },
         ];
@@ -308,14 +291,14 @@ mod test {
     fn match_first_available_regex_pattern() {
         let routes = vec![
             Route {
-                src: SrcLocation::parse("8080/(foo)/bar").unwrap(),
+                src: "8080/(foo)/bar".parse().unwrap(),
                 dest: DestLocation::parse("9090/bar/(foo)/1").unwrap()
             },
             // This path is longer, and so can accidentally be sorted
             // before the above if path length is taken into account
             // when it shouldn't be:
             Route {
-                src: SrcLocation::parse("8080/(foo)/(bar)").unwrap(),
+                src: "8080/(foo)/(bar)".parse().unwrap(),
                 dest: DestLocation::parse("9090/(bar)/(foo)/2").unwrap()
             }
         ];
@@ -331,13 +314,13 @@ mod test {
         let routes = vec![
             // This basic prefix route should not be picked:
             Route {
-                src: SrcLocation::parse("8080/hello/bar/").unwrap(),
+                src: "8080/hello/bar/".parse().unwrap(),
                 dest: DestLocation::parse("9090/wibble/0/").unwrap()
             },
             // This regex path should be picked, because exact regex routes
             // should always match over prefix routes:
             Route {
-                src: SrcLocation::parse("=8080/(hello)/(bar)/wibble").unwrap(),
+                src: "=8080/(hello)/(bar)/wibble".parse().unwrap(),
                 dest: DestLocation::parse("9090/wibble/1/").unwrap()
             },
         ];
@@ -353,12 +336,12 @@ mod test {
         let routes = vec![
             // This basic prefix route should not be picked:
             Route {
-                src: SrcLocation::parse("8080/foo").unwrap(),
+                src: "8080/foo".parse().unwrap(),
                 dest: DestLocation::parse("9090/1").unwrap()
             },
             // This shorter but exact route should be picked:
             Route {
-                src: SrcLocation::parse("=8080/foo").unwrap(),
+                src: "=8080/foo".parse().unwrap(),
                 dest: DestLocation::parse("9090/2").unwrap()
             },
         ];
@@ -375,38 +358,38 @@ mod test {
             // The first route is not regex based; this should be ignored
             // in favour of exact regex ones where applicable:
             Route {
-                src: SrcLocation::parse("8080/hello/bar/").unwrap(),
+                src: "8080/hello/bar/".parse().unwrap(),
                 dest: DestLocation::parse("9090/wibble/0/").unwrap()
             },
             // Regex based but *not* exact (no trailing '='), so should
             // be less specific than all of the below:
             Route {
-                src: SrcLocation::parse("8080/(foo)/bar").unwrap(),
+                src: "8080/(foo)/bar".parse().unwrap(),
                 dest: DestLocation::parse("9090/bar/(foo)/nonexact").unwrap()
             },
             Route {
-                src: SrcLocation::parse("=8080/(foo)/bar").unwrap(),
+                src: "=8080/(foo)/bar".parse().unwrap(),
                 dest: DestLocation::parse("9090/bar/(foo)/1").unwrap()
             },
             // Multiple captures helps test that we have built up the
             // right regex to match on in the first place, since greediness
             // can lead to only the last capture being spotted:
             Route {
-                src: SrcLocation::parse("=8080/(foo)/(bar)").unwrap(),
+                src: "=8080/(foo)/(bar)".parse().unwrap(),
                 dest: DestLocation::parse("9090/(bar)/(foo)/2").unwrap()
             },
             Route {
-                src: SrcLocation::parse("=8080/(foo)/(bar)/wibble").unwrap(),
+                src: "=8080/(foo)/(bar)/wibble".parse().unwrap(),
                 dest: DestLocation::parse("9090/wibble/(bar)/(foo).json3").unwrap()
             },
             // This should capture anything with at least one '/' in the middle:
             Route {
-                src: SrcLocation::parse("=8080/(foo..)/(bar)/boom").unwrap(),
+                src: "=8080/(foo..)/(bar)/boom".parse().unwrap(),
                 dest: DestLocation::parse("9090/boom/(bar)/(foo)/4").unwrap()
             },
             // This should capture anything with 'BOOM' in the middle
             Route {
-                src: SrcLocation::parse("=8080/(foo..)/BOOM/(bar..)").unwrap(),
+                src: "=8080/(foo..)/BOOM/(bar..)".parse().unwrap(),
                 dest: DestLocation::parse("9090/(foo)/exploding/(bar)").unwrap()
             },
         ];

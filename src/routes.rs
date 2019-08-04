@@ -13,8 +13,8 @@ pub fn from_args<I: IntoIterator<Item=String>>(args: I) -> Result<(Vec<Route>, i
     let mut args = args.into_iter().peekable();
     let mut expects_more = false;
     while let Some(peeked) = args.peek() {
-        let peeked = peeked.clone();
-        if let Ok(src) = SrcLocation::parse(&peeked) {
+        let peeked = peeked.to_owned();
+        if let Ok(src) = SrcLocation::parse(peeked.clone()) {
 
             // we've parsed more:
             expects_more = false;
@@ -98,15 +98,7 @@ pub struct Route {
 
 impl Route {
     pub fn src_socket_addr(&self) -> Result<SocketAddr, Error> {
-        let mut addrs = self.src.url.to_socket_addrs().map_err(|e| {
-            err!("Cannot parse socket address to listen on: {}", e)
-        })?;
-
-        if let Some(addr) = addrs.next() {
-            Ok(addr)
-        } else {
-            Err(err!("Cannot parse socket address to listen on"))
-        }
+        self.src.to_socket_addr()
     }
 }
 
@@ -119,7 +111,7 @@ mod test {
 
     fn s (s: &str) -> String { s.to_owned() }
     fn dest_url (u: &str) -> DestLocation { DestLocation::Url(Url::from_str(u).unwrap()) }
-    fn src_url (u: &str) -> SrcLocation { SrcLocation::parse(u).unwrap() }
+    fn src_url (u: &str) -> SrcLocation { u.parse().unwrap() }
 
     #[test]
     fn routes_can_be_parsed() {
