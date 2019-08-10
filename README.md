@@ -97,13 +97,13 @@ Prebuilt compressed binaries are available [here](https://github.com/jsdw/weave/
 If you like, you can download and decompress the latest release on the commandline. On **MacOS**, run:
 
 ```
-curl -L https://github.com/jsdw/weave/releases/download/v0.2.2/weave-v0.2.2-x86_64-apple-darwin.tar.gz | tar -xz
+curl -L https://github.com/jsdw/weave/releases/download/v0.3.0/weave-v0.3.0-x86_64-apple-darwin.tar.gz | tar -xz
 ```
 
 For **Linux**, run:
 
 ```
-curl -L https://github.com/jsdw/weave/releases/download/v0.2.2/weave-v0.2.2-x86_64-unknown-linux-musl.tar.gz | tar -xz
+curl -L https://github.com/jsdw/weave/releases/download/v0.3.0/weave-v0.3.0-x86_64-unknown-linux-musl.tar.gz | tar -xz
 ```
 
 In either case, you'll end up with a `weave` binary in your current folder. The examples assume that you have placed this into your `$PATH` so that it can be called from anywhere.
@@ -121,10 +121,10 @@ rustup toolchain install nightly-2019-07-26
 rustup default nightly-2019-07-26
 ```
 
-Finally, to install a release of `weave` (here, v0.2.2), run the following:
+Finally, to install a release of `weave` (here, v0.3.0), run the following:
 
 ```
-cargo install --git https://github.com/jsdw/weave.git --tag v0.2.2 --force
+cargo install --git https://github.com/jsdw/weave.git --tag v0.3.0 --force
 ```
 
 This installs the latest version of `weave` into a local `.cargo/bin` folder that the rust installation will have prompted you to add to your `$PATH`. The `--force` command overwrites any existing `weave` binary in this folder; you can ditch it if you don't want this behaviour.
