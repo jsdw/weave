@@ -70,18 +70,10 @@ impl SplitUrl<'_> {
     }
 }
 
-/// Split path_and_query into separate path and query pieces, noting that a '?' can appear
-/// inside a pattern for src locations and so ignoring those.
+/// Split path_and_query into separate path and query pieces
 fn split_path_and_query(path_and_query: &str) -> (&str, &str) {
-    lazy_static!{
-        static ref QUERY_PARAMS_RE: Regex = Regex::new(r"\?([^)]|$)").expect("query_params_re");
-    }
-
-    // Split on '?' if exists outside of a match point.
-    // @TODO: Do something useful with query params.
-    if let Some(m) = QUERY_PARAMS_RE.find(path_and_query) {
-        let n = m.start();
-        (&path_and_query[0..n], &path_and_query[n+1..])
+    if let Some(idx) = path_and_query.find('?') {
+        (&path_and_query[0..idx], &path_and_query[idx+1..])
     } else {
         (path_and_query, "")
     }

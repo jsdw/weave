@@ -74,10 +74,14 @@ impl DestLocation {
                 let current_query: Vec<_> = query_pairs(&query_copy).collect();
                 for (key, val) in query_pairs(matches.query()) {
                     if current_query.iter().all(|(k,_)| k != &key) {
-                        if !current_query.is_empty() { query.push('&'); }
+                        if !current_query.is_empty() {
+                            query.push('&');
+                        }
                         query.push_str(key);
-                        query.push('=');
-                        query.push_str(val);
+                        if !val.is_empty() {
+                            query.push('=');
+                            query.push_str(val);
+                        }
                     }
                 }
 
@@ -183,7 +187,7 @@ fn expand_str_with_matches<'a>(matches: &Matches, s: &'a str) -> Cow<'a,str> {
 
 /// Given a query fragment, return pairs of query params.
 fn query_pairs<'a>(query: &'a str) -> impl Iterator<Item=(&'a str, &'a str)> {
-    query.split('&').map(|part| {
+    query.split('&').filter(|part| !part.is_empty()).map(|part| {
         if let Some(mid) = part.find('=') {
             (&part[0..mid],&part[mid+1..])
         } else {
