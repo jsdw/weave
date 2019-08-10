@@ -1,3 +1,11 @@
+# 0.3.0
+
+## Improvements
+
+- Large refactoring of internals to make it easier to make future changes.
+- A bunch more tests.
+- Better support for query parameters in matching and route resolution.
+
 # 0.2.2
 
 ## Improvements
