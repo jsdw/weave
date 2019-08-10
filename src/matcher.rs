@@ -235,7 +235,8 @@ mod test {
         test_route_matches(
             vec![
                 ("1010/1", "9090/1?foo=bar"),
-                ("1010/2/(foo)/bar", "9090/2?foo=(foo)")
+                ("1010/2/(foo)/bar", "9090/2?foo=(foo)"),
+                ("1010/3", "9090/3"),
             ],
             vec![
                 ("/1", url("http://localhost:9090/1?foo=bar")),
@@ -249,6 +250,10 @@ mod test {
                 // Query params are expanded from patterns as well:
                 ("/2/fooey/bar", url("http://localhost:9090/2?foo=fooey")),
                 ("/2/wobbly/bar?lark=2", url("http://localhost:9090/2?foo=wobbly&lark=2")),
+                // Query params provided to routes with none already should be ok:
+                ("/3?foo", url("http://localhost:9090/3?foo")),
+                ("/3?foo&bar=2", url("http://localhost:9090/3?foo&bar=2")),
+                ("/3?foo=bar&wobble=wibble", url("http://localhost:9090/3?foo=bar&wobble=wibble")),
             ]
         )
     }

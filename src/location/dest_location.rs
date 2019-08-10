@@ -74,7 +74,7 @@ impl DestLocation {
                 let current_query: Vec<_> = query_pairs(&query_copy).collect();
                 for (key, val) in query_pairs(matches.query()) {
                     if current_query.iter().all(|(k,_)| k != &key) {
-                        if !current_query.is_empty() {
+                        if !query.is_empty() {
                             query.push('&');
                         }
                         query.push_str(key);
