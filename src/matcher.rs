@@ -30,62 +30,13 @@ impl Matcher {
 #[cfg(test)]
 mod test {
 
-    use std::str::FromStr;
     use hyper::Uri;
-    use url::Url;
-    use std::path::PathBuf;
     use crate::location::{ DestLocation };
 
     use super::*;
 
     fn uri (s: &str) -> Uri { s.parse().unwrap() }
-    fn url (u: &str) -> Url { Url::from_str(u).unwrap() }
-    fn resolved_url (u: &str) -> ResolvedLocation { ResolvedLocation::Url(url(u)) }
-    fn path (s: &str) -> PathBuf { s.into() }
-
-    #[test]
-    fn basic_merging_with_urls() {
-        let cases = vec![
-            // Some basic checks:
-            ("/bar", uri("/"), url("http://localhost"), url("http://localhost/bar")),
-            ("/bar/", uri("/"), url("http://localhost:8080/"), url("http://localhost:8080/bar/")),
-            ("bar/", uri("/"), url("http://localhost"), url("http://localhost/bar/")),
-            // Merging paths:
-            ("/bar", uri("/"), url("http://localhost/lark"), url("http://localhost/lark/bar")),
-            ("/bar/", uri("/"), url("http://localhost/lark/foo"), url("http://localhost/lark/foo/bar/")),
-            ("bar/", uri("/"), url("http://localhost/lark"), url("http://localhost/lark/bar/")),
-            // Merging paths and query strings:
-            ("/bar", uri("/"), url("http://localhost/lark?a=2"), url("http://localhost/lark/bar?a=2")),
-            ("/bar/", uri("/?b=hi"), url("http://localhost/lark/foo?a=bye"), url("http://localhost/lark/foo/bar/?a=bye&b=hi")),
-            // TODO: Override query params with those from URI rather than just combining them:
-            ("bar/", uri("/?b=hi&c=2"), url("http://localhost/lark?c=6"), url("http://localhost/lark/bar/?c=6&b=hi&c=2")),
-        ];
-
-        for (tail, uri, url, expected) in cases {
-            assert_eq!(merge_tail_and_uri_with_url(tail, &uri, url), expected);
-        }
-    }
-
-    #[test]
-    fn basic_merging_with_paths() {
-        let cases = vec![
-            // Basic checks:
-            ("/bar", path("../foo"), path("../foo/bar")),
-            ("/bar/wibble", path("../foo"), path("../foo/bar/wibble")),
-            ("/bar/wibble/something.jpg", path("../foo"), path("../foo/bar/wibble/something.jpg")),
-            // '..' parts can only undo additional parts of the path:
-            ("/../../../", path("../foo"), path("../foo")),
-            ("/../bar", path("../foo"), path("../foo/bar")),
-            ("/../../bar", path("../foo"), path("../foo/bar")),
-            ("/bar/../", path("../foo"), path("../foo/")),
-            ("/bar/../lark", path("../foo"), path("../foo/lark")),
-            ("./bar/.././lark", path("../foo"), path("../foo/lark")),
-        ];
-
-        for (tail, path, expected) in cases {
-            assert_eq!(merge_tail_with_path(tail, path), expected);
-        }
-    }
+    fn resolved_url (u: &str) -> ResolvedLocation { ResolvedLocation::Url(u.to_owned()) }
 
     #[test]
     fn exact_prefix_means_exact() {

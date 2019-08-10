@@ -105,12 +105,10 @@ impl Route {
 #[cfg(test)]
 mod test {
 
-    use std::str::FromStr;
-    use url::Url;
     use super::*;
 
     fn s (s: &str) -> String { s.to_owned() }
-    fn dest_url (u: &str) -> DestLocation { DestLocation::Url(Url::from_str(u).unwrap()) }
+    fn dest_url (u: &str) -> DestLocation { DestLocation::parse(u).unwrap() }
     fn src_url (u: &str) -> SrcLocation { u.parse().unwrap() }
 
     #[test]
