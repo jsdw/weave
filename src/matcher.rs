@@ -1,12 +1,6 @@
 use hyper::Uri;
-use url::Url;
-use lazy_static::lazy_static;
-use regex::Regex;
-use std::cmp::{ Ordering };
-use std::path::PathBuf;
-use std::borrow::{ Borrow, Cow };
 use crate::routes::{ Route };
-use crate::location::{ DestLocation, ResolvedLocation };
+use crate::location::{ ResolvedLocation };
 
 #[derive(Debug, Clone)]
 pub struct Matcher {
@@ -16,30 +10,7 @@ pub struct Matcher {
 impl Matcher {
     /// Build a new matcher given some routes we'd like to match on:
     pub fn new(mut routes: Vec<Route>) -> Matcher {
-        // Ordering:
-        // 1. basic exact match (longest first)
-        // 2. regex exact match (in order declared)
-        // 3. basic prefix (longest first)
-        // 4. regex prefix (in order declared)
-        routes.sort_by(|a, b| {
-            // Put all exact matching routes first:
-            a.src.is_exact().cmp(&b.src.is_exact()).reverse().then_with(|| {
-                match (a.src.has_patterns(), b.src.has_patterns()) {
-                    // If regex, put that last, but maintain
-                    // ordering within regex'd paths:
-                    (true, true)   => Ordering::Equal,
-                    (false, true)  => Ordering::Less,
-                    (true, false)  => Ordering::Greater,
-                    // If neither is regex, reverse sort based on path length
-                    // to put longer paths first:
-                    (false, false) => {
-                        a.src.path_len()
-                            .cmp(&b.src.path_len())
-                            .reverse()
-                    }
-                }
-            })
-        });
+        routes.sort_by(|a,b| a.src.cmp(&b.src));
         Matcher { routes }
     }
 
@@ -48,115 +19,12 @@ impl Matcher {
     pub fn resolve(&self, uri: &Uri) -> Option<ResolvedLocation> {
         // Find a matching route. We assume routes are ordered and
         // the first match wins.
-        self.routes.iter().find_map(|route| resolve_route(uri, route))
-    }
-}
-
-fn resolve_route(uri: &Uri, route: &Route) -> Option<ResolvedLocation> {
-    let path = uri.path();
-    let re = route.src.path_regex();
-
-    // Attempt to match on provided regex:
-    if let Some(captures) = re.captures(path) {
-        let rest_of_path = &path[ captures.get(0).unwrap().end().. ];
-        Some(match route.dest.clone() {
-            DestLocation::Url(url) => {
-                let expanded_url = expand_url_with_captures(&captures, url);
-                ResolvedLocation::Url(merge_tail_and_uri_with_url(rest_of_path, uri, expanded_url))
-            },
-            DestLocation::FilePath(path) => {
-                let expanded_path = expand_path_with_captures(&captures, path);
-                ResolvedLocation::FilePath(merge_tail_with_path(rest_of_path, expanded_path))
-            }
+        self.routes.iter().find_map(|route| {
+            route.src.match_uri(uri).map(|matches| {
+                route.dest.resolve(&matches)
+            })
         })
     }
-    // The URI failed to match this route:
-    else {
-        None
-    }
-}
-
-fn expand_url_with_captures(captures: &regex::Captures, mut url: Url) -> Url {
-    let new_path = expand_str_with_captures(captures, url.path()).into_owned();
-    url.set_path(&new_path);
-    url
-}
-
-fn expand_path_with_captures(captures: &regex::Captures, path: String) -> PathBuf {
-    let new_path = expand_str_with_captures(captures, &path);
-    let s: &str = new_path.borrow();
-    s.into()
-}
-
-fn expand_str_with_captures<'a>(captures: &regex::Captures, s: &'a str) -> Cow<'a, str> {
-    lazy_static!{
-        // Are we matching on parts of the path?
-        static ref MATCH_NAME_RE: Regex = Regex::new(r"\(([a-zA-Z][a-zA-Z0-9_-]*)\)").expect("match_point_re");
-    }
-
-    // @TODO: Figure out lifetimes to avoid returning owned strings in closure:
-    MATCH_NAME_RE.replace_all(s, |cap: &regex::Captures| -> String {
-        let replace_name = cap.get(1).unwrap().as_str();
-        if let Some(replacement) = captures.name(replace_name) {
-            replacement.as_str().to_owned()
-        } else {
-            cap.get(0).unwrap().as_str().to_owned()
-        }
-    })
-}
-
-fn merge_tail_and_uri_with_url(tail: &str, uri: &Uri, mut url: Url) -> Url {
-
-    if !tail.is_empty() {
-        let curr_path = url.path().trim_end_matches('/');
-        let tail_path = tail.trim_start_matches('/');
-        let combined_path = format!("{}/{}", curr_path, tail_path);
-        url.set_path(&combined_path);
-    }
-
-    let curr_query = url.query()
-        .map(|q| q.to_owned())
-        .unwrap_or(String::new());
-    let uri_query = uri.query()
-        .map(|q| q.to_owned())
-        .unwrap_or(String::new());
-
-    if !curr_query.is_empty() && !uri_query.is_empty() {
-        url.set_query(Some(&format!("{}&{}", curr_query, uri_query)));
-    } else if !curr_query.is_empty() || !uri_query.is_empty() {
-        url.set_query(Some(&format!("{}{}", curr_query, uri_query)));
-    } else {
-        url.set_query(None);
-    }
-
-    url
-}
-
-fn merge_tail_with_path(tail: &str, mut path: PathBuf) -> PathBuf {
-
-    let bits = tail.split('/').filter(|s| !s.is_empty());
-    let mut appended = 0;
-
-    for bit in bits {
-        // Ignore bits that would do nothing:
-        if bit == "." || bit.is_empty() {
-            continue
-        }
-        // Only allow going up in the path if we've gone down:
-        else if bit == ".." {
-            if appended > 0 {
-                path.pop();
-                appended -= 1;
-            }
-        }
-        // Append ordinary path pieces:
-        else {
-            path.push(bit);
-            appended += 1;
-        }
-    }
-
-    path
 }
 
 #[cfg(test)]

@@ -252,7 +252,7 @@ async fn do_handle_request(mut req: Request<Body>, dest_path: &ResolvedLocation)
             *req.uri_mut() = format!("{}", url).parse().unwrap();
             // Remove the host header (it's set according to URI if not present):
             req.headers_mut().remove("host");
-            // Supoprt HTTPS (8 DNS worker threads):
+            // Support HTTPS (8 DNS worker threads):
             let https = HttpsConnector::new(8)?;
             // Proxy the request through and pass back the response:
             let response = Client::builder()

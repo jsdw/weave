@@ -1,32 +1,141 @@
-use url::Url;
+use lazy_static::lazy_static;
+use regex::Regex;
 use std::str::FromStr;
 use std::path::{ self, PathBuf };
 use std::fmt;
 use std::borrow::Cow;
 use crate::errors::{ Error };
+use super::src_location::{ Matches };
+use super::utils::{ SplitUrl };
 
 /// A Destination location. This is what a request can be rerouted to.
 /// On matching, we look at the pair of source and destination locations
 /// in order to construct a `ResolvedLocation`, which is where the request
 /// will actually be routed to.
 #[derive(Debug,Clone,PartialEq,Eq)]
-pub enum DestLocation {
-    Url(Url),
-    FilePath(String),
+pub struct DestLocation(DestLocationInner);
+
+#[derive(Debug,Clone,PartialEq,Eq)]
+pub enum DestLocationInner {
+    Url{ host_bits: String, path: String, query: String },
+    FilePath(String)
 }
 
 impl DestLocation {
-    pub fn parse(input: impl AsRef<str>) -> Result<DestLocation, Error> {
-        let s = input.as_ref().trim().to_owned();
+    /// Parse a string into a destination location.
+    pub fn parse(original: impl AsRef<str>) -> Result<DestLocation, Error> {
+        let input = original.as_ref().trim();
 
         // Starts with a '.' or '/', so will assume it's a filepath:
-        if [Some('.'), Some(path::MAIN_SEPARATOR)].contains(&s.chars().next()) {
-            return Ok(DestLocation::FilePath(s.into()));
+        if [Some('.'), Some(path::MAIN_SEPARATOR)].contains(&input.chars().next()) {
+            return Ok(DestLocation(DestLocationInner::FilePath(input.to_owned())));
         }
 
-        // Else, assume something like a URL has been provided:
-        let url = parse_url(s)?;
-        Ok(DestLocation::Url(url))
+        // Else, expect it to look like a URL (this normalises things as well,
+        // adding back a protocol/host/port if missing):
+        let url = SplitUrl::parse(input)?;
+
+        // Complain if the protocol is wrong:
+        if !["http", "https"].contains(&url.protocol) {
+            return Err(err!("Invalid protocol, expecting http or https only"));
+        }
+
+        let host_bits = if url.port == 80 {
+            format!("{}://{}", url.protocol, url.host)
+        } else {
+            format!("{}://{}:{}", url.protocol, url.host, url.port)
+        };
+
+        Ok(DestLocation(DestLocationInner::Url{
+            host_bits, path: url.path.into_owned(), query: url.query.to_owned()
+        }))
+    }
+    /// Output a resolved location given Matches from a source location.
+    pub fn resolve(&self, matches: &Matches) -> ResolvedLocation {
+        match &self.0 {
+            DestLocationInner::Url{ host_bits, path, query } => {
+                // Substitute in matches (to the path+query params):
+                let mut path = expand_str_with_matches(matches, &path).into_owned();
+                let mut query = expand_str_with_matches(matches, &query).into_owned();
+
+                // Append the rest of the path onto the new URL:
+                let path_tail = matches.path_tail();
+                if !path_tail.is_empty() {
+                    if path.ends_with('/') {
+                        path.push_str(path_tail.trim_start_matches('/'));
+                    } else {
+                        if !path_tail.starts_with('/') { path.push('/'); }
+                        path.push_str(path_tail);
+                    }
+                }
+
+                // Append any query params that don't exist in the dest location already:
+                let query_copy = query.clone();
+                let current_query: Vec<_> = query_pairs(&query_copy).collect();
+                for (key, val) in query_pairs(matches.query()) {
+                    if current_query.iter().all(|(k,_)| k != &key) {
+                        if !current_query.is_empty() { query.push('&'); }
+                        query.push_str(key);
+                        query.push('=');
+                        query.push_str(val);
+                    }
+                }
+
+                // Put everything together to get our final output URL:
+                let url = if query.is_empty() {
+                    format!("{}{}", host_bits, path)
+                } else {
+                    format!("{}{}?{}", host_bits, path, query)
+                };
+                ResolvedLocation::Url(url)
+            },
+            DestLocationInner::FilePath(path) => {
+                // Substitute in matches (to any part of the path):
+                let mut path: PathBuf = expand_str_with_matches(matches, &path).into_owned().into();
+
+                // Append the rest of the path onto the new file path:
+                let bits = matches.path_tail().split('/').filter(|s| !s.is_empty());
+                let mut appended = 0;
+                for bit in bits {
+                    // Ignore bits that would do nothing:
+                    if bit == "." {
+                        continue
+                    }
+                    // Only allow going up in the path if we've gone down:
+                    else if bit == ".." {
+                        if appended > 0 {
+                            path.pop();
+                            appended -= 1;
+                        }
+                    }
+                    // Append ordinary path pieces:
+                    else {
+                        path.push(bit);
+                        appended += 1;
+                    }
+                }
+
+                ResolvedLocation::FilePath(path)
+            }
+        }
+
+    }
+}
+
+impl fmt::Display for DestLocation {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match &self.0 {
+            DestLocationInner::Url{ host_bits, path, query } => {
+                if query.is_empty() {
+                    write!(f, "{}{}", host_bits, path)
+                } else {
+                    write!(f, "{}{}?{}", host_bits, path, query)
+                }
+            }
+            DestLocationInner::FilePath(path) => {
+                path.fmt(f)
+            }
+        }
     }
 }
 
@@ -37,20 +146,11 @@ impl FromStr for DestLocation {
     }
 }
 
-impl fmt::Display for DestLocation {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            DestLocation::Url(url) => url.fmt(f),
-            DestLocation::FilePath(path) => path.fmt(f)
-        }
-    }
-}
-
 /// A ResolvedLocation is the destination of a given request, formed by
 /// looking at the source and destination locations provided.
 #[derive(Debug,Clone,PartialEq,Eq)]
 pub enum ResolvedLocation {
-    Url(Url),
+    Url(String),
     FilePath(PathBuf)
 }
 
@@ -63,48 +163,31 @@ impl fmt::Display for ResolvedLocation {
     }
 }
 
-/// Parse something that looks like a URL into one:
-fn parse_url(input: impl AsRef<str>) -> Result<Url, Error> {
-    let mut s = Cow::Borrowed(input.as_ref());
+/// Given a str and some Matches, return a string with the matches substituted into it.
+fn expand_str_with_matches<'a>(matches: &Matches, s: &'a str) -> Cow<'a,str> {
+    lazy_static!{
+        // Are we matching on parts of the path?
+        static ref MATCH_NAME_RE: Regex = Regex::new(r"\(([a-zA-Z][a-zA-Z0-9_-]*)\)").expect("match_point_re");
+    }
 
-    // Starts with a port (eg `8080/foo/bar` or `:8080`)?
-    // Add a host:
-    let port_bit = {
-        let no_path = if let Some(idx) = s.find('/') {
-            &s[..idx]
+    // @TODO: Figure out lifetimes to avoid returning owned strings in closure:
+    MATCH_NAME_RE.replace_all(s, |cap: &regex::Captures| -> String {
+        let replace_name = cap.get(1).unwrap().as_str();
+        if let Some(replacement) = matches.get(replace_name) {
+            replacement.to_owned()
         } else {
-            &s
-        };
-        if no_path.starts_with(":") {
-            &no_path[1..]
-        } else {
-            no_path
+            cap.get(0).unwrap().as_str().to_owned()
         }
-    };
-    if let Ok(_) = port_bit.parse::<u16>() {
-        let mut new_s = "localhost:".to_owned();
-        new_s.push_str(if s.starts_with(":") { &s[1..] } else { &s });
-        s = Cow::Owned(new_s);
-    }
+    })
+}
 
-    // Doesn't have a scheme? Add one.
-    if let None = s.find("://") {
-        let mut new_s = "http://".to_owned();
-        new_s.push_str(&s);
-        s = Cow::Owned(new_s);
-    }
-
-    // Now, attempt to parse to a URL:
-    let url: Url = if let Ok(url) = s.parse() {
-        Ok(url)
-    } else {
-        Err(err!("Not a valid URL"))
-    }?;
-
-    // Complain if the URL scheme is wrong:
-    if !["http", "https"].contains(&url.scheme()) {
-        return Err(err!("Invalid scheme, expecting http or https only"));
-    }
-
-    Ok(url)
+/// Given a query fragment, return pairs of query params.
+fn query_pairs<'a>(query: &'a str) -> impl Iterator<Item=(&'a str, &'a str)> {
+    query.split('&').map(|part| {
+        if let Some(mid) = part.find('=') {
+            (&part[0..mid],&part[mid+1..])
+        } else {
+            (part, "")
+        }
+    })
 }
