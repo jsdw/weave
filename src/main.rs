@@ -10,7 +10,7 @@ use std::env;
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
-use clap::{ App, AppSettings };
+use clap::{ App, AppSettings, crate_version };
 use hyper::{ Client, Body, Request, Response, Server };
 use hyper::service::{ service_fn, make_service_fn };
 use hyper_tls::HttpsConnector;
@@ -132,7 +132,7 @@ async fn run() -> Result<(), Error> {
     let _ = App::new("weave")
         .author("James Wilson <james@jsdw.me>")
         .about("A lightweight HTTP router and file server.")
-        .version("0.2")
+        .version(crate_version!())
         .after_help(EXAMPLES)
         .usage("weave SOURCE to DEST [and SOURCE to DEST ...]")
         .setting(AppSettings::NoBinaryName)
