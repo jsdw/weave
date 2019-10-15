@@ -1,3 +1,10 @@
+# 0.3.1
+
+## Improvements
+
+- Bump compiler version to the latest Rust beta.
+- Bump dependencies.
+
 # 0.3.0
 
 ## Improvements

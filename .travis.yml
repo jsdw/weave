@@ -4,7 +4,7 @@
 dist: trusty
 language: rust
 rust:
-  - nightly-2019-07-26
+  - beta
 services: docker
 sudo: required
 

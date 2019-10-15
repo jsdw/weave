@@ -1,19 +1,19 @@
 [package]
 name = "weave"
-version = "0.3.0"
+version = "0.3.1"
 authors = ["James Wilson <james@jsdw.me>"]
 edition = "2018"
 
 [dependencies]
-hyper = { git = "https://github.com/hyperium/hyper" }
-hyper-tls = { git = "https://github.com/hyperium/hyper-tls" }
-tokio = { git = "https://github.com/tokio-rs/tokio" }
-futures-util-preview = "0.3.0-alpha.17"
-mime_guess = "2.0.0-alpha.6"
+hyper = "0.13.0-alpha.4"
+hyper-tls = "0.4.0-alpha.4"
+tokio = "0.2.0-alpha.6"
+futures-util-preview = "0.3.0-alpha.19"
+mime_guess = "2.0.1"
 clap = "2.33.0"
-url = "1.7.2"
-ansi_term = "0.11.0"
-env_logger = "0.6.1"
-log = "0.4.0"
+url = "2.1.0"
+colored = "1.8"
+env_logger = "0.7.0"
+log = "0.4.8"
 regex = "1"
 lazy_static = "1"

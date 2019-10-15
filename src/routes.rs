@@ -13,6 +13,14 @@ pub fn from_args<I: IntoIterator<Item=String>>(args: I) -> Result<(Vec<Route>, i
     let mut args = args.into_iter().peekable();
     let mut expects_more = false;
     while let Some(peeked) = args.peek() {
+
+        // CLI options (-f, --foo) must come after route spec. When we see
+        // something that looks like a CLI option, abandon route building and
+        // return the rest of the args (including this one):
+        if peeked.starts_with("-") {
+            break
+        }
+
         let peeked = peeked.to_owned();
         if let Ok(src) = SrcLocation::parse(peeked.clone()) {
 
@@ -180,7 +188,6 @@ mod test {
         let bad_routes = vec![
             vec![s("9090")],
             vec![s("9090"), s("to")],
-            vec![s("9090"), s("to"), s("--option")],
             vec![s("9090"), s("to"), s("9091"), s("and")],
             vec![s("9090"), s("to"), s("9091"), s("and"), s("--option")],
         ];
