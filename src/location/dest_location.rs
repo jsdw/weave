@@ -248,7 +248,10 @@ mod test {
 
     use super::*;
 
-    fn u (u: &str) -> DestLocation { DestLocation::parse(u).unwrap() }
+    fn u (u: &str) -> DestLocation {
+        let src: SrcLocation = "http://localhost:1234".parse().unwrap();
+        DestLocation::parse(u, &src).unwrap()
+    }
 
     #[test]
     fn dest_location_can_parse_valid_inputs() {
@@ -287,7 +290,8 @@ mod test {
         ];
 
         for (actual, expected) in urls {
-            let actual_loc: Result<DestLocation, _> = actual.parse();
+            let src: SrcLocation = "localhost".parse().unwrap();
+            let actual_loc: Result<DestLocation, _> = DestLocation::parse(actual, &src);
             assert!(actual_loc.is_ok(), "Location could not be parsed: '{}', result: {:?}", actual, actual_loc);
             assert_eq!(actual_loc.unwrap(), expected, "(Original was '{}')", actual);
         }
@@ -301,8 +305,48 @@ mod test {
         ];
 
         for actual in urls {
-            let actual_loc: Result<DestLocation, _> = actual.parse();
+            let src: SrcLocation = "localhost".parse().unwrap();
+            let actual_loc: Result<DestLocation, _> = DestLocation::parse(actual, &src);
             assert!(actual_loc.is_err(), "This invalid location should not have successfully parsed: {}", actual);
+        }
+    }
+
+    #[test]
+    fn dest_location_relates_to_src() {
+        const VALID: bool = true;
+        const INVALID: bool = false;
+
+        let routes = vec![
+            (VALID, "tcp://localhost:22", "tcp://localhost:2222"),
+            (VALID, "tcp://localhost:22", "localhost:2222"),
+            (VALID, "tcp://localhost:22", "2222"), // assume localhost for dest if not given
+            (VALID, "http://localhost:22", "2222"), // assume localhost for dest if not given
+            (VALID, "tcp://localhost:22", "localhost"), // assume same port as src if not given
+            (VALID, "http://localhost", "localhost:2222"),
+            (INVALID, "https://localhost", "localhost:2222"), // https is not a valid src protocol
+            (INVALID, "tcp://localhost", "localhost:22"), // src needs port if TCP
+            (INVALID, "tcp://127.0.0.1:2222", "http://localhost"), // protocol mismatch
+            (INVALID, "http://127.0.0.1:2222", "tcp://localhost"), // protocol mismatch
+            (INVALID, "tcp://localhost/foo", "80"), // no paths allowed on TCP
+            (INVALID, "tcp://localhost", "80/foo"), // no paths allowed on TCP
+        ];
+
+        for (is_valid, src, dest) in routes {
+            let src_l: SrcLocation = match src.parse() {
+                Ok(src) => src,
+                Err(e) => {
+                    if is_valid {
+                        assert!(true, "{} should be valid src but got error: {}", src, e);
+                    }
+                    continue
+                }
+            };
+            let dest_l = DestLocation::parse(dest, &src_l);
+            if is_valid {
+                assert!(dest_l.is_ok(), "{} => {} should be VALID but got error: {}", src, dest, dest_l.unwrap_err());
+            } else {
+                assert!(dest_l.is_err(), "{} => {} should be INVALID", src, dest);
+            }
         }
     }
 

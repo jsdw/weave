@@ -2,9 +2,14 @@
 
 # Weave
 
-A simple CLI based HTTP router/proxy. Useful if you need to wire together a few things and expose them behind a single host/port, or just as a fast, single-binary alternative to `php -s` or `static-server`.
+A simple CLI based HTTP/TCP router/proxy. Useful if you need to wire together a few things and expose them behind a single host/port, or just as a fast, single-binary alternative to `php -s` or `static-server`. Also useful if you need to proxy TCP traffic to another location.
 
 # Examples
+
+Forward TCP connections from `localhost:2222` to `1.2.3.4:22`:
+```
+weave tcp://localhost:2222 to 1.2.3.4:22
+```
 
 Serve static files from the current directory on `localhost:8080`:
 ```

@@ -31,7 +31,7 @@ impl Matcher {
 mod test {
 
     use hyper::Uri;
-    use crate::location::{ DestLocation, ResolvedLocation };
+    use crate::location::{ SrcLocation, DestLocation, ResolvedLocation };
 
     use super::*;
 
@@ -40,9 +40,10 @@ mod test {
     fn none () -> Option<ResolvedLocation> { None }
     fn test_route_matches(routes: Vec<(&str,&str)>, cases: Vec<(&str, Option<ResolvedLocation>)>) {
         let routes: Vec<Route> = routes.into_iter().map(|(src,dest)| {
+            let src: SrcLocation = src.parse().unwrap();
             Route {
-                src: src.parse().unwrap(),
-                dest: DestLocation::parse(dest).unwrap()
+                src: src.clone(),
+                dest: DestLocation::parse(dest, &src).unwrap()
             }
         }).collect();
         let matcher = Matcher::new(routes);

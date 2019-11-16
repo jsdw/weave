@@ -1,3 +1,13 @@
+# 0.4.0
+
+## Additions
+
+- Add support for TCP proxying.
+
+## Improvements
+
+- Support stable Rust and bump a few dependencies
+
 # 0.3.1
 
 ## Improvements

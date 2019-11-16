@@ -124,8 +124,13 @@ mod test {
     use super::*;
 
     fn s (s: &str) -> String { s.to_owned() }
-    fn dest_url (u: &str) -> DestLocation { DestLocation::parse(u).unwrap() }
-    fn src_url (u: &str) -> SrcLocation { u.parse().unwrap() }
+    fn route(src: &str, dest: &str) -> Route {
+        let src: SrcLocation = src.parse().unwrap();
+        Route {
+            src: src.clone(),
+            dest: DestLocation::parse(dest, &src).unwrap()
+        }
+    }
 
     #[test]
     fn routes_can_be_parsed() {
@@ -144,20 +149,14 @@ mod test {
             (
                 vec![s("8080"), s("to"), s("9090")],
                 vec![
-                    Route {
-                        src: src_url("http://localhost:8080/"),
-                        dest: dest_url("http://localhost:9090")
-                    }
+                    route("http://localhost:8080/", "http://localhost:9090")
                 ],
                 0
             ),
             (
                 vec![s("8080/foo/bar"), s("to"), s("9090/foo"), s("more"), s("args")],
                 vec![
-                    Route {
-                        src: src_url("http://localhost:8080/foo/bar"),
-                        dest: dest_url("http://localhost:9090/foo")
-                    }
+                    route("http://localhost:8080/foo/bar", "http://localhost:9090/foo")
                 ],
                 2
             ),
@@ -166,14 +165,8 @@ mod test {
                      s("9091"), s("to"), s("9090/lark"),
                      s("more"), s("args")],
                 vec![
-                    Route {
-                        src: src_url("http://localhost:8080/foo/bar"),
-                        dest: dest_url("http://localhost:9090/foo")
-                    },
-                    Route {
-                        src: src_url("http://localhost:9091/"),
-                        dest: dest_url("http://localhost:9090/lark")
-                    }
+                    route("http://localhost:8080/foo/bar", "http://localhost:9090/foo"),
+                    route("http://localhost:9091/", "http://localhost:9090/lark")
                 ],
                 2
             ),

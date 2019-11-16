@@ -6,6 +6,10 @@ use regex::{ Regex, Captures};
 pub fn text() -> String {
     prettify_code(&format!("{EXAMPLES}
 
+Forward TCP connections from `localhost:2222` to `1.2.3.4:22`:
+
+{tcp_example1}
+
 Serve static files from `./client/files` on `localhost:8080`, and redirect HTTP
 requests starting with `localhost:8080/api` to `localhost:9090`:
 
@@ -56,6 +60,8 @@ local folder:
 ",
     EXAMPLES="EXAMPLES:".bold(),
 
+    tcp_example1="weave tcp://localhost:2222 to 1.2.3.4:22".cyan(),
+
     example1a="weave 8080 to ./client/files and 8080/api to 9090".cyan(),
     example1b="# Examples of routing given the above:
 # http://localhost:8080/api/foo => http://localhost:9090/foo
@@ -105,7 +111,7 @@ local folder:
 # http://localhost:8080/1/2/3/api/foo => ./files/foo.json
 # http://localhost:8080/wibble/api/foo => ./files/foo.json
 # http://localhost:8080/bar/api/foo => ./files/foo.json
-# http://localhost:8080/api/foo => No route matches this".white(),
+# http://localhost:8080/api/foo => No route matches this".white()
 
     ))
 }

@@ -46,7 +46,7 @@ async fn run() -> Result<(), Error> {
 
     let _ = App::new("weave")
         .author("James Wilson <james@jsdw.me>")
-        .about("A lightweight HTTP router and file server.")
+        .about("A lightweight HTTP/TCP router and file server.")
         .version(crate_version!())
         .after_help(&*examples::text())
         .usage("weave SOURCE to DEST [and SOURCE to DEST ...] [OPTIONS]")
@@ -120,7 +120,11 @@ async fn do_handle_tcp_requests(socket_addr: SocketAddr, route: Route) -> Result
         // Accept an incoming connection:
         let (mut src_socket, _) = match listener.accept().await {
             Ok(sock) => sock,
-            Err(e) => { warn!("Error accepting connection on {}: {}", socket_addr, e); continue }
+            Err(e) => {
+                warn!("{}", format!("[tcp] error accepting connection on {}: {}",
+                                    socket_addr, e).red());
+                continue
+            }
         };
         // Proxy data to the outbound route provided:
         tokio::spawn(async move {
@@ -128,19 +132,25 @@ async fn do_handle_tcp_requests(socket_addr: SocketAddr, route: Route) -> Result
 
             let mut dest_socket = match TcpStream::connect(dest_socket_addr).await {
                 Ok(sock) => sock,
-                Err(e) => { warn!("Error connecting to destination TCP socket at {}: {}", dest_socket_addr, e); return }
+                Err(e) => {
+                    warn!("{}", format!("[tcp] error connecting to destination {}: {}",
+                                        dest_socket_addr, e).red());
+                    return
+                }
             };
             let (mut dest_read, mut dest_write) = dest_socket.split();
 
             join!(
                 async move {
                     if let Err(e) = src_read.copy(&mut dest_write).await {
-                        warn!("Error copying data from TCP source to destination: {}", e);
+                        warn!("{}", format!("[tcp] error streaming out from {} to {}: {}",
+                                            socket_addr, dest_socket_addr, e).yellow());
                     }
                 },
                 async move {
                     if let Err(e) = dest_read.copy(&mut src_write).await {
-                        warn!("Error copying data from TCP destination to source: {}", e);
+                        warn!("{}", format!("[tcp] error streaming back from {} to {}: {}",
+                                            dest_socket_addr, socket_addr, e).yellow());
                     }
                 }
             );
