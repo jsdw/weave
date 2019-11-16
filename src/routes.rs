@@ -1,6 +1,6 @@
 use std::net::{ SocketAddr };
 use crate::errors::{ Error };
-use crate::location::{ SrcLocation, DestLocation };
+use crate::location::{ SrcLocation, DestLocation, Protocol };
 
 /// Take some args and hand back a vector of Routes we've parsed out of them,
 /// plus an Iterator of unused args:
@@ -49,7 +49,7 @@ pub fn from_args<I: IntoIterator<Item=String>>(args: I) -> Result<(Vec<Route>, i
             // The arg following the 'to' should be another location
             // or something is wrong:
             let dest = if let Some(dest) = args.next() {
-                DestLocation::parse(&dest).map_err(|e| {
+                DestLocation::parse(&dest, &src).map_err(|e| {
                     err!("Error parsing '{}': {}", dest, e)
                 })
             } else {
@@ -105,8 +105,16 @@ pub struct Route {
 }
 
 impl Route {
+    pub fn protocol(&self) -> Protocol {
+        self.src.protocol()
+    }
     pub fn src_socket_addr(&self) -> Result<SocketAddr, Error> {
         self.src.to_socket_addr()
+    }
+    /// TCP destinations have a socket address we can
+    /// talk to them on. HTTP(s) destinations do not.
+    pub fn dest_socket_addr(&self) -> Option<SocketAddr> {
+        self.dest.socket_addr()
     }
 }
 

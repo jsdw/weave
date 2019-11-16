@@ -114,14 +114,7 @@ Alternately, you can compile `weave` from source.
 
 First, go to [https://www.rust-lang.org/tools/install](https://www.rust-lang.org/tools/install) and install Rust.
 
-Next, run these commands to download and use the correct version of the language:
-
-```
-rustup toolchain install beta
-rustup default beta
-```
-
-Finally, to install a release of `weave` (here, v0.3.1), run the following:
+Then to install a release of `weave` (here, v0.3.1), run the following:
 
 ```
 cargo install --git https://github.com/jsdw/weave.git --tag v0.3.1 --force

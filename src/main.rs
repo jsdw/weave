@@ -1,3 +1,5 @@
+#![type_length_limit="1676346"]
+
 #[macro_use] mod errors;
 mod examples;
 mod routes;
@@ -7,18 +9,18 @@ mod logging;
 
 use std::env;
 use std::collections::HashMap;
-use std::net::SocketAddr;
+use std::net::{ SocketAddr };
 use std::sync::Arc;
 use clap::{ App, AppSettings, crate_version };
 use hyper::{ Client, Body, Request, Response, Server };
 use hyper::service::{ service_fn, make_service_fn };
 use hyper_tls::HttpsConnector;
-use tokio::{ self, fs };
+use tokio::{ self, fs, net::{ TcpListener, TcpStream }, prelude::* };
 use colored::*;
-use futures_util::future::join_all;
+use futures_util::{ future::join_all, join };
 
 use routes::{ Route };
-use location::{ ResolvedLocation };
+use location::{ ResolvedLocation, Protocol };
 use matcher::Matcher;
 use errors::{ Error };
 
@@ -69,8 +71,34 @@ async fn run() -> Result<(), Error> {
     }
 
     // Map each addr+route pair into a future that will handle requests:
-    let servers = route_map.into_iter().map(|(socket_addr, routes)| {
-        handle_requests(socket_addr, routes)
+    let servers = route_map.into_iter().map(|(socket_addr, routes)| async move {
+        let mut http_routes = Vec::new();
+        let mut tcp_route = None;
+
+        for route in routes {
+            let protocol = route.protocol();
+            match protocol {
+                Protocol::Http | Protocol::Https => {
+                    http_routes.push(route);
+                },
+                Protocol::Tcp => {
+                    tcp_route = Some(route);
+                }
+            }
+        }
+
+        let tcp_fut = async move {
+            if let Some(r) = tcp_route {
+                handle_tcp_requests(socket_addr, r).await;
+            }
+        };
+        let http_fut = async move {
+            if http_routes.len() > 0 {
+                handle_http_requests(socket_addr, http_routes).await;
+            }
+        };
+
+        join!(tcp_fut, http_fut)
     });
 
     // Wait for these to finish (shouldn't happen unless they all fail):
@@ -78,8 +106,50 @@ async fn run() -> Result<(), Error> {
     Ok(())
 }
 
-/// Handle incoming requests by matching on routes and dispatching as necessary
-async fn handle_requests(socket_addr: SocketAddr, routes: Vec<Route>) {
+/// Handle raw TCP proxying
+async fn handle_tcp_requests(socket_addr: SocketAddr, route: Route) {
+    if let Err(e) = do_handle_tcp_requests(socket_addr, route).await {
+        error!("{}", e);
+    }
+}
+async fn do_handle_tcp_requests(socket_addr: SocketAddr, route: Route) -> Result<(),Error> {
+    let dest_socket_addr = route.dest_socket_addr().unwrap();
+    let mut listener = TcpListener::bind(socket_addr).await?;
+
+    loop {
+        // Accept an incoming connection:
+        let (mut src_socket, _) = match listener.accept().await {
+            Ok(sock) => sock,
+            Err(e) => { warn!("Error accepting connection on {}: {}", socket_addr, e); continue }
+        };
+        // Proxy data to the outbound route provided:
+        tokio::spawn(async move {
+            let (mut src_read, mut src_write) = src_socket.split();
+
+            let mut dest_socket = match TcpStream::connect(dest_socket_addr).await {
+                Ok(sock) => sock,
+                Err(e) => { warn!("Error connecting to destination TCP socket at {}: {}", dest_socket_addr, e); return }
+            };
+            let (mut dest_read, mut dest_write) = dest_socket.split();
+
+            join!(
+                async move {
+                    if let Err(e) = src_read.copy(&mut dest_write).await {
+                        warn!("Error copying data from TCP source to destination: {}", e);
+                    }
+                },
+                async move {
+                    if let Err(e) = dest_read.copy(&mut src_write).await {
+                        warn!("Error copying data from TCP destination to source: {}", e);
+                    }
+                }
+            );
+        });
+    }
+}
+
+/// Handle incoming HTTP requests by matching on routes and dispatching as necessary
+async fn handle_http_requests(socket_addr: SocketAddr, routes: Vec<Route>) {
 
     let matcher = Arc::new(Matcher::new(routes));
     let make_service = make_service_fn(move |_| {
@@ -87,7 +157,7 @@ async fn handle_requests(socket_addr: SocketAddr, routes: Vec<Route>) {
         let svc = Ok::<_,Error>(service_fn(move |req| {
             let matcher = Arc::clone(&matcher);
             async move {
-                let res = handle_request(req, &socket_addr, &matcher).await;
+                let res = handle_http_request(req, &socket_addr, &matcher).await;
                 // We don't return any errors, so need to tell Rust
                 // what the error type would be:
                 Result::<_,Error>::Ok(res)
@@ -105,7 +175,7 @@ async fn handle_requests(socket_addr: SocketAddr, routes: Vec<Route>) {
 }
 
 /// Handle a single request, given a matcher that defines how to map from input to output:
-async fn handle_request(req: Request<Body>, socket_addr: &SocketAddr, matcher: &Matcher) -> Response<Body> {
+async fn handle_http_request(req: Request<Body>, socket_addr: &SocketAddr, matcher: &Matcher) -> Response<Body> {
     let before_time = std::time::Instant::now();
     let src_path = format!("{}{}", socket_addr, req.uri());
     let dest_path = matcher.resolve(req.uri());
@@ -121,7 +191,7 @@ async fn handle_request(req: Request<Body>, socket_addr: &SocketAddr, matcher: &
                 .unwrap()
         },
         Some(dest_path) => {
-            match do_handle_request(req, &dest_path).await {
+            match do_handle_http_request(req, &dest_path).await {
                 Ok(resp) => {
                     let duration = before_time.elapsed();
                     let status_code = resp.status().as_u16();
@@ -159,7 +229,7 @@ async fn handle_request(req: Request<Body>, socket_addr: &SocketAddr, matcher: &
 
 }
 
-async fn do_handle_request(mut req: Request<Body>, dest_path: &ResolvedLocation) -> Result<Response<Body>, Error> {
+async fn do_handle_http_request(mut req: Request<Body>, dest_path: &ResolvedLocation) -> Result<Response<Body>, Error> {
     match dest_path {
         // Proxy to the URI our request matched against:
         ResolvedLocation::Url(url) => {

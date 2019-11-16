@@ -1,12 +1,12 @@
 use lazy_static::lazy_static;
 use regex::Regex;
-use std::str::FromStr;
 use std::path::{ self, PathBuf };
 use std::fmt;
 use std::borrow::Cow;
+use std::net::{ SocketAddr };
 use crate::errors::{ Error };
-use super::src_location::{ Matches };
-use super::utils::{ SplitUrl };
+use super::src_location::{ SrcLocation, Matches };
+use super::utils::{ Protocol, SplitUrl, to_socket_addr };
 
 /// A Destination location. This is what a request can be rerouted to.
 /// On matching, we look at the pair of source and destination locations
@@ -18,12 +18,14 @@ pub struct DestLocation(DestLocationInner);
 #[derive(Debug,Clone,PartialEq,Eq)]
 pub enum DestLocationInner {
     Url{ host_bits: String, path: String, query: String },
+    Socket { address: SocketAddr },
     FilePath(String)
 }
 
 impl DestLocation {
-    /// Parse a string into a destination location.
-    pub fn parse(original: impl AsRef<str>) -> Result<DestLocation, Error> {
+    /// Parse a string into a destination location. The corresponding source location is
+    /// required as it may impact what is valid as a destination location.
+    pub fn parse(original: impl AsRef<str>, src: &SrcLocation) -> Result<DestLocation, Error> {
         let input = original.as_ref().trim();
 
         // Starts with a '.' or '/', so will assume it's a filepath:
@@ -34,21 +36,65 @@ impl DestLocation {
         // Else, expect it to look like a URL (this normalises things as well,
         // adding back a protocol/host/port if missing):
         let url = SplitUrl::parse(input)?;
+        let src_protocol = src.protocol();
 
-        // Complain if the protocol is wrong:
-        if !["http", "https"].contains(&url.protocol) {
-            return Err(err!("Invalid protocol, expecting http or https only"));
+        // React based on the source protocol to form a desination location:
+        match src_protocol {
+            Protocol::Http | Protocol::Https => {
+                let dest_protocol = url.protocol.unwrap_or(Protocol::Http);
+                if !&[Protocol::Http, Protocol::Https].contains(&dest_protocol) {
+                    return Err(err!("Given a source protocol of '{}', the destination protocol \
+                                     should be 'http' or 'https'", src_protocol))
+                }
+
+                let host_bits = if let Some(port) = url.port {
+                    format!("{}://{}:{}", dest_protocol, url.host, port)
+                } else {
+                    format!("{}://{}", dest_protocol, url.host)
+                };
+
+                Ok(DestLocation(DestLocationInner::Url{
+                    host_bits, path: url.path.into_owned(), query: url.query.to_owned()
+                }))
+
+            },
+            Protocol::Tcp => {
+                let dest_protocol = url.protocol.unwrap_or(src_protocol);
+                if dest_protocol != src_protocol {
+                    return Err(err!("The destination protocol should match the source protocol \
+                                     of '{}'", src_protocol))
+                }
+                if url.path != "/" {
+                    return Err(err!("The destination cannot have a path when the source protocol \
+                                     is '{}'", src_protocol))
+                }
+                if url.query != "" {
+                    return Err(err!("The destination cannot have a query string when the source \
+                                     protocol is '{}'", src_protocol))
+                }
+
+                // Use the source port if a destination port isn't provided since
+                // it's the best hint that we have (and a not-unreasonable one):
+                let port = url.port.unwrap_or(src.port());
+
+                let socket_addr = match to_socket_addr(&url.host, port) {
+                    Ok(addr) => addr,
+                    Err(e) => return Err(e)
+                };
+
+                Ok(DestLocation(DestLocationInner::Socket {
+                    address: socket_addr
+                }))
+            }
         }
-
-        let host_bits = if url.port == 80 {
-            format!("{}://{}", url.protocol, url.host)
-        } else {
-            format!("{}://{}:{}", url.protocol, url.host, url.port)
-        };
-
-        Ok(DestLocation(DestLocationInner::Url{
-            host_bits, path: url.path.into_owned(), query: url.query.to_owned()
-        }))
+    }
+    /// If the destination location is just a TCP socket address,
+    /// We can ask for it here.
+    pub fn socket_addr(&self) -> Option<SocketAddr> {
+        match &self.0 {
+            DestLocationInner::Socket { address } => Some(*address),
+            _ => None
+        }
     }
     /// Output a resolved location given Matches from a source location.
     pub fn resolve(&self, matches: &Matches) -> ResolvedLocation {
@@ -120,6 +166,11 @@ impl DestLocation {
                 }
 
                 ResolvedLocation::FilePath(path)
+            },
+            DestLocationInner::Socket{ address } => {
+                // If we are directed at a socket address, we have no matches to
+                // substitute so we just resolve it to a URL, assuming HTTP protocol:
+                ResolvedLocation::Url(format!("http://{}", address))
             }
         }
 
@@ -135,18 +186,14 @@ impl fmt::Display for DestLocation {
                 } else {
                     write!(f, "{}{}?{}", host_bits, path, query)
                 }
-            }
+            },
             DestLocationInner::FilePath(path) => {
                 path.fmt(f)
+            },
+            DestLocationInner::Socket { address } => {
+                address.fmt(f)
             }
         }
-    }
-}
-
-impl FromStr for DestLocation {
-    type Err = Error;
-    fn from_str(input: &str) -> Result<Self, Self::Err> {
-        DestLocation::parse(input)
     }
 }
 

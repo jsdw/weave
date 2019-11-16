@@ -23,7 +23,7 @@
 
 ## Improvements
 
-- More thorough examples are now provided on `-h`, including exampels of the routing for each.
+- More thorough examples are now provided on `-h`, including examples of the routing for each.
 
 # 0.2.0
 

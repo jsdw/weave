@@ -4,7 +4,7 @@
 dist: trusty
 language: rust
 rust:
-  - beta
+  - stable
 services: docker
 sudo: required
 

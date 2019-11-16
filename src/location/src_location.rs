@@ -5,22 +5,24 @@ use url::Host;
 use std::cmp::Ordering;
 use std::str::FromStr;
 use std::fmt;
-use std::net::{ SocketAddr, ToSocketAddrs };
+use std::net::{ SocketAddr };
 use crate::errors::{ Error };
-use super::utils::{ SplitUrl };
+use super::utils::{ SplitUrl, Protocol, to_socket_addr };
 
 /// A source location. It should be something that looks a little
 /// like a URL, so that we know what interface and port to listen on, and
 /// what path to match on incoming requests if any.
 #[derive(Debug,Clone)]
 pub struct SrcLocation {
-    /// Host:
+    /// Protocol (tcp, http, https)
+    protocol: Protocol,
+    /// Host
     host: Host<String>,
-    /// Port:
+    /// Port
     port: u16,
-    /// Raw path as entered, for display purposes:
+    /// Raw path as entered, for display purposes
     path: String,
-    /// Match on paths using this regex:
+    /// Match on paths using this regex
     path_regex: Regex,
     /// Do we want this to be for exact matches only?
     exact: bool,
@@ -42,27 +44,58 @@ impl SrcLocation {
 
         // Split the URL into pieces:
         let SplitUrl { protocol, host, port, path, .. } = SplitUrl::parse(input)?;
+        let protocol = protocol.unwrap_or(Protocol::Http);
 
-        if protocol != "http" {
-            return Err(err!("Invalid protocol: expected 'http'"))
+        // Decide what to do based on the protocol:
+        match protocol {
+            Protocol::Tcp => {
+                if path != "/" {
+                    return Err(err!("A path cannot be provided when specifying a {} route", protocol))
+                }
+                if port.is_none() {
+                    return Err(err!("A port must be provided with {} route", protocol))
+                }
+                Ok(SrcLocation {
+                    protocol,
+                    host,
+                    path: String::new(),
+                    port: port.unwrap(),
+                    path_regex: Regex::new("").unwrap(),
+                    exact: true,
+                    has_patterns: false
+                })
+            },
+            Protocol::Http => {
+                // Parse the path into pieces to build a regex from:
+                let path_pieces = parse_path(&path);
+                // Did we find any patterns?
+                let has_patterns = path_pieces.iter().any(|p| if let PathPiece::Pattern{..} = p { true } else { false });
+                // Make the regex:
+                let path_regex = convert_path_pieces_to_regex(path_pieces, exact);
+
+                // and hand this all back:
+                Ok(SrcLocation {
+                    protocol: Protocol::Http,
+                    host,
+                    path: path.into_owned(),
+                    port: port.unwrap_or(80),
+                    path_regex,
+                    exact,
+                    has_patterns
+                })
+            },
+            Protocol::Https => {
+                Err(err!("'https' can be provided as the destination location but not as a source location"))
+            }
         }
-
-        // Parse the path into pieces to build a regex from:
-        let path_pieces = parse_path(&path);
-        // Did we find any patterns?
-        let has_patterns = path_pieces.iter().any(|p| if let PathPiece::Pattern{..} = p { true } else { false });
-        // Make the regex:
-        let path_regex = convert_path_pieces_to_regex(path_pieces, exact);
-
-        // and hand this all back:
-        Ok(SrcLocation {
-            host,
-            path: path.into_owned(),
-            port,
-            path_regex,
-            exact,
-            has_patterns
-        })
+    }
+    /// What protocol is this route using.
+    pub fn protocol(&self) -> Protocol {
+        self.protocol
+    }
+    /// What port is this route using.
+    pub fn port(&self) -> u16 {
+        self.port
     }
     /// Match an incoming request and give back a map of key->value pairs
     /// found in performing the match.
@@ -88,22 +121,7 @@ impl SrcLocation {
     }
     /// Hand back a socket address that we can listen on for this route.
     pub fn to_socket_addr(&self) -> Result<SocketAddr, Error> {
-        match self.host {
-            Host::Ipv4(addr) => Ok(SocketAddr::from((addr,self.port))),
-            Host::Ipv6(addr) => Ok(SocketAddr::from((addr,self.port))),
-            Host::Domain(ref s) => {
-                // This does a potentially blocking lookup.
-                let mut addrs = (&**s, self.port).to_socket_addrs().map_err(|e| {
-                    err!("Cannot parse socket address to listen on: {}", e)
-                })?;
-
-                if let Some(addr) = addrs.next() {
-                    Ok(addr)
-                } else {
-                    Err(err!("Cannot parse socket address to listen on"))
-                }
-            }
-        }
+        to_socket_addr(&self.host, self.port)
     }
 }
 
@@ -161,9 +179,9 @@ impl FromStr for SrcLocation {
 impl fmt::Display for SrcLocation {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         if self.port == 80 {
-            write!(f, "{}{}", self.host, self.path)
+            write!(f, "{}://{}{}", self.protocol, self.host, self.path)
         } else {
-            write!(f, "{}:{}{}", self.host, self.port, self.path)
+            write!(f, "{}://{}:{}{}", self.protocol, self.host, self.port, self.path)
         }
     }
 }

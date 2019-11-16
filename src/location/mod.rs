@@ -4,3 +4,4 @@ mod utils;
 
 pub use src_location::*;
 pub use dest_location::*;
+pub use utils::Protocol;
