@@ -168,7 +168,7 @@ async fn do_handle_request(mut req: Request<Body>, dest_path: &ResolvedLocation)
             // Remove the host header (it's set according to URI if not present):
             req.headers_mut().remove("host");
             // Support HTTPS:
-            let https = HttpsConnector::new()?;
+            let https = HttpsConnector::new();
             // Proxy the request through and pass back the response:
             let response = Client::builder()
                 .build(https)

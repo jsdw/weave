@@ -1,9 +1,17 @@
+# 0.3.2
+
+## Improvements
+
+- Bump dependencies off alpha versions.
+- Use the stable Rust compiler now that `async`/`await` is stable.
+
 # 0.3.1
 
 ## Improvements
 
 - Bump compiler version to the latest Rust beta.
 - Bump dependencies.
+- Improve example output in `--help`.
 
 # 0.3.0
 

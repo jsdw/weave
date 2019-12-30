@@ -1,14 +1,14 @@
 [package]
 name = "weave"
-version = "0.3.1"
+version = "0.3.2"
 authors = ["James Wilson <james@jsdw.me>"]
 edition = "2018"
 
 [dependencies]
-hyper = "0.13.0-alpha.4"
-hyper-tls = "0.4.0-alpha.4"
-tokio = "0.2.0-alpha.6"
-futures-util-preview = "0.3.0-alpha.19"
+hyper = "0.13.1"
+hyper-tls = "0.4.0"
+tokio = { version = "0.2.6", features = ["full"] }
+futures-util = "0.3.1"
 mime_guess = "2.0.1"
 clap = "2.33.0"
 url = "2.1.0"
