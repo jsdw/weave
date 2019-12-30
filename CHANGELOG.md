@@ -1,3 +1,9 @@
+# 0.4.1
+
+## Improvements
+
+- Bump tokio and associated dependencies to latest.
+
 # 0.4.0
 
 ## Additions

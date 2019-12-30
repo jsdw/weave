@@ -15,7 +15,7 @@ use clap::{ App, AppSettings, crate_version };
 use hyper::{ Client, Body, Request, Response, Server };
 use hyper::service::{ service_fn, make_service_fn };
 use hyper_tls::HttpsConnector;
-use tokio::{ self, fs, net::{ TcpListener, TcpStream }, prelude::* };
+use tokio::{ self, fs, net::{ TcpListener, TcpStream } };
 use colored::*;
 use futures_util::{ future::join_all, join };
 
@@ -142,13 +142,13 @@ async fn do_handle_tcp_requests(socket_addr: SocketAddr, route: Route) -> Result
 
             join!(
                 async move {
-                    if let Err(e) = src_read.copy(&mut dest_write).await {
+                    if let Err(e) = tokio::io::copy(&mut src_read, &mut dest_write).await {
                         warn!("{}", format!("[tcp] error streaming out from {} to {}: {}",
                                             socket_addr, dest_socket_addr, e).yellow());
                     }
                 },
                 async move {
-                    if let Err(e) = dest_read.copy(&mut src_write).await {
+                    if let Err(e) = tokio::io::copy(&mut dest_read, &mut src_write).await {
                         warn!("{}", format!("[tcp] error streaming back from {} to {}: {}",
                                             dest_socket_addr, socket_addr, e).yellow());
                     }
@@ -248,7 +248,7 @@ async fn do_handle_http_request(mut req: Request<Body>, dest_path: &ResolvedLoca
             // Remove the host header (it's set according to URI if not present):
             req.headers_mut().remove("host");
             // Support HTTPS:
-            let https = HttpsConnector::new()?;
+            let https = HttpsConnector::new();
             // Proxy the request through and pass back the response:
             let response = Client::builder()
                 .build(https)
