@@ -1,5 +1,11 @@
 # 0.5.1
 
+## Improvements
+
+- Fix example colouring for newly added examples.
+
+# 0.5.0
+
 ## Additions
 
 - allow "nothing" to be substituted for a route on the CLI (eg `weave nothing and 8080 to 9090`),
