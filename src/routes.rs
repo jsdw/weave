@@ -202,21 +202,18 @@ mod test {
                 ],
                 0
             ),
-            // // "nothing" can take the palce of a destination (it'll return 404):
-            // (
-            //     vec![
-            //         s("nothing"), s("to"), s("9090"), s("and"),
-            //         s("8081"), s("to"), s("9091"), s("and"),
-            //         s("nothing"), s("and"),
-            //         s("nothing"), s("and"),
-            //         s("8082"), s("to"), s("9092"),
-            //     ],
-            //     vec![
-            //         route("http://localhost:8081/", "http://localhost:9091"),
-            //         route("http://localhost:8082/", "http://localhost:9092"),
-            //     ],
-            //     0
-            // ),
+            // "nothing" can take the place of a destination (it'll return 404):
+            (
+                vec![
+                    s("8081"), s("to"), s("nothing"), s("and"),
+                    s("8082"), s("to"), s("statuscode://403")
+                ],
+                vec![
+                    route("http://localhost:8081/", "statuscode://404"),
+                    route("http://localhost:8082/", "statuscode://403"),
+                ],
+                0
+            ),
             (
                 vec![s("8080/foo/bar"), s("to"), s("9090/foo"), s("--more"), s("args")],
                 vec![

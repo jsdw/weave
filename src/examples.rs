@@ -116,12 +116,12 @@ Declare routes that do nothing using \"nothing\" (can be useful for scripted use
 # http://localhost:8080/1/2/3/api/foo => ./files/foo.json
 # http://localhost:8080/wibble/api/foo => ./files/foo.json
 # http://localhost:8080/bar/api/foo => ./files/foo.json
-# http://localhost:8080/api/foo => No route matches this".white()
+# http://localhost:8080/api/foo => No route matches this".white(),
 
     example9="# Pick a specific status code (only valid HTTP status codes are allowed):
 weave 8080 to statuscode://403
 # The alias \"nothing\" returns a 404 Not Found status:
-weave 8080 to nothing"
+weave 8080 to nothing",
 
     example10="weave nothing and 8080 to 9090"
 
