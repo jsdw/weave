@@ -19,6 +19,7 @@ pub struct DestLocation(DestLocationInner);
 pub enum DestLocationInner {
     Url{ host_bits: String, path: String, query: String },
     Socket { address: SocketAddr },
+    HttpStatusCode { code: hyper::StatusCode },
     FilePath(String)
 }
 
@@ -35,16 +36,28 @@ impl DestLocation {
 
         // Else, expect it to look like a URL (this normalises things as well,
         // adding back a protocol/host/port if missing):
-        let url = SplitUrl::parse(input)?;
         let src_protocol = src.protocol();
 
         // React based on the source protocol to form a desination location:
         match src_protocol {
-            Protocol::Http | Protocol::Https => {
+            Protocol::Https | Protocol::HttpStatusCode => {
+                // This should be checked when parsing the source location and so is probably an error
+                // if we get here, but for safety we do the check and return a reasonable message:
+                return Err(err!("The source protocol cannot be {} or {}", Protocol::Https, Protocol::HttpStatusCode))
+            },
+            Protocol::Http => {
+                // Is the destination a status code? Try parsing that first.
+                if let Some(statuscode_str) = parse_statuscode_str(input) {
+                    let code = statuscode_str.parse()?;
+                    return Ok(DestLocation(DestLocationInner::HttpStatusCode{ code }))
+                }
+
+                // Otherwise, assume that the destination is a valid URL..
+                let url = SplitUrl::parse(input)?;
                 let dest_protocol = url.protocol.unwrap_or(Protocol::Http);
-                if !&[Protocol::Http, Protocol::Https].contains(&dest_protocol) {
-                    return Err(err!("Given a source protocol of '{}', the destination protocol \
-                                     should be 'http' or 'https'", src_protocol))
+                if !&[Protocol::Http, Protocol::Https, Protocol::HttpStatusCode].contains(&dest_protocol) {
+                    return Err(err!("Given a source protocol of '{}', the destination protocol should be '{}', '{}' or '{}'",
+                                    src_protocol, Protocol::Http, Protocol::Https, Protocol::HttpStatusCode))
                 }
 
                 let host_bits = if let Some(port) = url.port {
@@ -56,9 +69,9 @@ impl DestLocation {
                 Ok(DestLocation(DestLocationInner::Url{
                     host_bits, path: url.path.into_owned(), query: url.query.to_owned()
                 }))
-
             },
             Protocol::Tcp => {
+                let url = SplitUrl::parse(input)?;
                 let dest_protocol = url.protocol.unwrap_or(src_protocol);
                 if dest_protocol != src_protocol {
                     return Err(err!("The destination protocol should match the source protocol \
@@ -171,6 +184,10 @@ impl DestLocation {
                 // If we are directed at a socket address, we have no matches to
                 // substitute so we just resolve it to a URL, assuming HTTP protocol:
                 ResolvedLocation::Url(format!("http://{}", address))
+            },
+            DestLocationInner::HttpStatusCode{ code } => {
+                // Status code destinations just resolve to a code:
+                ResolvedLocation::HttpStatusCode(*code)
             }
         }
 
@@ -190,6 +207,9 @@ impl fmt::Display for DestLocation {
             DestLocationInner::FilePath(path) => {
                 path.fmt(f)
             },
+            DestLocationInner::HttpStatusCode{ code } => {
+                write!(f, "statuscode://{}", code)
+            }
             DestLocationInner::Socket { address } => {
                 address.fmt(f)
             }
@@ -202,6 +222,7 @@ impl fmt::Display for DestLocation {
 #[derive(Debug,Clone,PartialEq,Eq)]
 pub enum ResolvedLocation {
     Url(String),
+    HttpStatusCode(hyper::StatusCode),
     FilePath(PathBuf)
 }
 
@@ -209,7 +230,8 @@ impl fmt::Display for ResolvedLocation {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             ResolvedLocation::Url(url) => url.fmt(f),
-            ResolvedLocation::FilePath(path) => path.to_string_lossy().fmt(f)
+            ResolvedLocation::FilePath(path) => path.to_string_lossy().fmt(f),
+            ResolvedLocation::HttpStatusCode(code) => write!(f, "statuscode://{}", code)
         }
     }
 }
@@ -243,6 +265,19 @@ fn query_pairs<'a>(query: &'a str) -> impl Iterator<Item=(&'a str, &'a str)> {
     })
 }
 
+/// Match a statuscode://123 or "nothing" input:
+fn parse_statuscode_str(s: &str) -> Option<&str> {
+    if s == "nothing" {
+        return Some("404")
+    }
+    static START: &str = "statuscode://";
+    if s.starts_with(START) {
+        Some(&s[START.len()..])
+    } else {
+        None
+    }
+}
+
 #[cfg(test)]
 mod test {
 
@@ -251,6 +286,9 @@ mod test {
     fn u (u: &str) -> DestLocation {
         let src: SrcLocation = "http://localhost:1234".parse().unwrap();
         DestLocation::parse(u, &src).unwrap()
+    }
+    fn code (n: u16) -> DestLocation {
+        DestLocation(DestLocationInner::HttpStatusCode{ code: hyper::StatusCode::from_u16(n).unwrap() })
     }
 
     #[test]
@@ -275,7 +313,7 @@ mod test {
             ("localhost", u("http://localhost/")),
             // localhost + port is ok:
             ("http://localhost:8080", u("http://localhost:8080/")),
-            // IP + parth is ok:
+            // IP + path is ok:
             ("http://127.0.0.1/foo", u("http://127.0.0.1/foo")),
             // can parse IP:
             ("http://127.0.0.1:8080/foo", u("http://127.0.0.1:8080/foo")),
@@ -286,7 +324,11 @@ mod test {
             // A standard hostname missing port and scheme:
             ("example.com", u("http://example.com/")),
             // Spaces either side will be ignored:
-            ("  \t example.com\t \t", u("http://example.com/"))
+            ("  \t example.com\t \t", u("http://example.com/")),
+            // Status code locations are ok:
+            ("statuscode://404", code(404)),
+            // Status code locations are ok:
+            ("statuscode://204", code(204)),
         ];
 
         for (actual, expected) in urls {
@@ -301,7 +343,10 @@ mod test {
     fn dest_location_wont_parse_invalid_urls() {
         let urls = vec![
             // Don't know this protocol:
-            "foobar://example.com"
+            "foobar://example.com",
+            // Statuscode should be a number:
+            "statuscode://abc",
+            "statuscode://100/abc",
         ];
 
         for actual in urls {
@@ -329,6 +374,10 @@ mod test {
             (INVALID, "http://127.0.0.1:2222", "tcp://localhost"), // protocol mismatch
             (INVALID, "tcp://localhost/foo", "80"), // no paths allowed on TCP
             (INVALID, "tcp://localhost", "80/foo"), // no paths allowed on TCP
+            (VALID, "http://127.0.0.1:2222", "statuscode://123"), // HTTP can route to a statuscode
+            (INVALID, "tcp://127.0.0.1:2222", "statuscode://123"), // TCP cannot route to a statuscode
+            (VALID, "http://127.0.0.1:2222", "nothing"), // HTTP can route to nothing (statuscode 404)
+            (INVALID, "tcp://127.0.0.1:2222", "nothing"), // What would "nothing" mean for TCP?
         ];
 
         for (is_valid, src, dest) in routes {

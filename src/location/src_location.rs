@@ -85,7 +85,10 @@ impl SrcLocation {
                 })
             },
             Protocol::Https => {
-                Err(err!("'https' can be provided as the destination location but not as a source location"))
+                Err(err!("'https' can be provided as the destination protocol but not as a source protocol"))
+            }
+            Protocol::HttpStatusCode => {
+                Err(err!("'statuscode' can be provided as the destination protocol but not as a source protocol"))
             }
         }
     }

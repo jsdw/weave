@@ -37,6 +37,7 @@ mod test {
 
     fn url (u: &str) -> Option<ResolvedLocation> { Some(ResolvedLocation::Url(u.to_owned())) }
     fn path (u: &str) -> Option<ResolvedLocation> { Some(ResolvedLocation::FilePath(u.to_owned().into())) }
+    fn code (n: u16) -> Option<ResolvedLocation> { Some(ResolvedLocation::HttpStatusCode(hyper::StatusCode::from_u16(n).unwrap())) }
     fn none () -> Option<ResolvedLocation> { None }
     fn test_route_matches(routes: Vec<(&str,&str)>, cases: Vec<(&str, Option<ResolvedLocation>)>) {
         let routes: Vec<Route> = routes.into_iter().map(|(src,dest)| {
@@ -94,6 +95,36 @@ mod test {
                 ("/foo/bar/wibble/lark/../", path("./wibble")),
                 ("/foo/bar/wibble/lark/../../", path(".")),
                 ("/foo/bar/wibble/lark/../../../", path(".")),
+            ]
+        )
+    }
+
+    #[test]
+    fn paths_and_statuscode() {
+        test_route_matches(
+            vec![
+                ("8080/foo/bar", "."),
+                ("8080/foo/bar/no", "statuscode://204"),
+                ("8080/foo/bar/404", "nothing")
+            ],
+            vec![
+                ("/", none()),
+                ("/foo", none()),
+                ("/foo/ba", none()),
+                ("/foo/bar", path(".")),
+                ("/foo/bar/", path(".")),
+                ("/foo/bar/yes", path("./yes")),
+                // Anything under 'no' matches the status code:
+                ("/foo/bar/no", code(204)),
+                ("/foo/bar/no/thing", code(204)),
+                ("/foo/bar/no/thing/other", code(204)),
+                // "nothing" aliases to the 404 status code:
+                ("/foo/bar/404", code(404)),
+                ("/foo/bar/404/lark", code(404)),
+                // This would still match the path and not the statuscode,
+                // because we don't preprocess '.' and '..' in paths, so they
+                // only have meaning w.r.t resolving to a filepath:
+                ("/foo/bar/wibble/../no", path("./no")),
             ]
         )
     }

@@ -40,7 +40,8 @@ async fn main() {
 /// Run the application, returning early on any synchronous errors:
 async fn run() -> Result<(), Error> {
 
-    let (routes, other_args) = routes::from_args(env::args().skip(1)).map_err(|e| {
+    let route_args: Vec<String> = env::args().skip(1).collect();
+    let (routes, other_args) = routes::from_args(&route_args).map_err(|e| {
         err!("failed to parse routes: {}", e)
     })?;
 
@@ -78,11 +79,14 @@ async fn run() -> Result<(), Error> {
         for route in routes {
             let protocol = route.protocol();
             match protocol {
-                Protocol::Http | Protocol::Https => {
+                Protocol::Http => {
                     http_routes.push(route);
                 },
                 Protocol::Tcp => {
                     tcp_route = Some(route);
+                }
+                Protocol::Https | Protocol::HttpStatusCode => {
+                    panic!("These are not valid source protocols, so we shouldn't get here");
                 }
             }
         }
@@ -213,7 +217,8 @@ async fn handle_http_request(req: Request<Body>, socket_addr: &SocketAddr, match
                         duration);
 
                     let info_string_colored =
-                        if status_code >= 200 && status_code < 300 { info_string.green() }
+                        if let ResolvedLocation::HttpStatusCode{..} = dest_path { info_string.green() }
+                        else if status_code >= 200 && status_code < 300 { info_string.green() }
                         else if status_code >= 300 && status_code < 400 { info_string.yellow() }
                         else { info_string.red() };
 
@@ -241,6 +246,14 @@ async fn handle_http_request(req: Request<Body>, socket_addr: &SocketAddr, match
 
 async fn do_handle_http_request(mut req: Request<Body>, dest_path: &ResolvedLocation) -> Result<Response<Body>, Error> {
     match dest_path {
+        // Return a status code:
+        ResolvedLocation::HttpStatusCode(code) => {
+            let res = Response::builder()
+                .status(*code)
+                .body(Body::empty())
+                .unwrap();
+            Ok(res)
+        },
         // Proxy to the URI our request matched against:
         ResolvedLocation::Url(url) => {
             // Set the request URI to our new destination:

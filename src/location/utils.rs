@@ -108,7 +108,8 @@ pub fn to_socket_addr(host: &Host, port: u16) -> Result<SocketAddr, Error> {
 pub enum Protocol {
     Http,
     Https,
-    Tcp
+    Tcp,
+    HttpStatusCode
 }
 
 impl FromStr for Protocol {
@@ -120,6 +121,8 @@ impl FromStr for Protocol {
             Ok(Protocol::Https)
         } else if s.eq_ignore_ascii_case("tcp") {
             Ok(Protocol::Tcp)
+        } else if s.eq_ignore_ascii_case("statuscode") {
+            Ok(Protocol::HttpStatusCode)
         } else {
             Err(err!("{} is not a supported protocol", s))
         }
@@ -131,7 +134,8 @@ impl fmt::Display for Protocol {
         f.write_str(match self {
             Protocol::Http => "http",
             Protocol::Https => "https",
-            Protocol::Tcp => "tcp"
+            Protocol::Tcp => "tcp",
+            Protocol::HttpStatusCode => "statuscode"
         })
     }
 }

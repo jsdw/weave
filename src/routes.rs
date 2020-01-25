@@ -4,98 +4,101 @@ use crate::location::{ SrcLocation, DestLocation, Protocol };
 
 /// Take some args and hand back a vector of Routes we've parsed out of them,
 /// plus an Iterator of unused args:
-pub fn from_args<I: IntoIterator<Item=String>>(args: I) -> Result<(Vec<Route>, impl Iterator<Item=String>), Error> {
-    let mut routes = vec![];
+pub fn from_args(args: &[String]) -> Result<(Vec<Route>, &[String]), Error> {
 
-    // If the first arg is a Location, expect the next two args to be
-    // 'to' and another Location. Each time the subsequent arg is 'and',
-    // look for the same again.
-    let mut args = args.into_iter().peekable();
-    let mut expects_more = false;
-    while let Some(peeked) = args.peek() {
+    // Split args we care about apart from CLI opts starting with '-':
+    let (args, rest) = args.iter()
+        .enumerate()
+        .find(|(_,arg)| arg.starts_with("-"))
+        .map_or_else(|| (args, &[][..]), |(n,_)| args.split_at(n));
 
-        // CLI options (-f, --foo) must come after route spec. When we see
-        // something that looks like a CLI option, abandon route building and
-        // return the rest of the args (including this one):
-        if peeked.starts_with("-") {
-            break
-        }
-
-        let peeked = peeked.to_owned();
-        if let Ok(src) = SrcLocation::parse(peeked.clone()) {
-
-            // we've parsed more:
-            expects_more = false;
-
-            // Next arg is valid Location (we peeked), so assume
-            // 'loc to loc' triplet and err if not.
-            args.next();
-
-            // The next arg after 'src' loc should be the word 'to'.
-            // If it's not, hand back an error:
-            let next_is_joiner = if let Some(joiner) = args.next() {
-                if joiner.trim() != "to" {
-                    false
-                } else {
-                    true
-                }
-            } else {
-                false
-            };
-            if !next_is_joiner {
-                return Err(err!("Expecting the word 'to' after the location '{}'", peeked));
-            }
-
-            // The arg following the 'to' should be another location
-            // or something is wrong:
-            let dest = if let Some(dest) = args.next() {
-                DestLocation::parse(&dest, &src).map_err(|e| {
-                    err!("Error parsing '{}': {}", dest, e)
-                })
-            } else {
-                Err(err!("Expecting a destination location to be provided after '{} to'", peeked))
-            }?;
-
-            // If we've made it this far, we have a Route:
-            routes.push(Route {
-                src,
-                dest
-            });
-
-            // Now, we either break or the next arg is 'and':
-            let next_is_and = if let Some(and) = args.peek() {
-                if and.trim() != "and" {
-                    false
-                } else {
-                    true
-                }
-            } else {
-                false
-            };
-            if !next_is_and {
-                break
-            } else {
-                // We expect another valid route now:
-                expects_more = true;
-                // consume the 'and' if we see it:
-                args.next();
-            }
-
-        } else {
-            // No more Route-like args so break out of this loop:
-            break
-        }
-    }
-
-    // we've seen an 'and', but then failed to parse a location:
-    if expects_more {
+    // The last argument shouldn't be "and":
+    if args.last().map_or(false, |l| l == "and") {
         return Err(err!("'and' not followed by a subsequent route"));
     }
 
-    // Hand back our routes, plus the rest of the args
-    // that we haven't iterated yet, if things were
-    // successful:
-    Ok(( routes, args ))
+    // Iterate the potential route args to build routes.
+    let mut routes = vec![];
+    let mut idx = 0;
+    let mut and_comes_next = false;
+    static NOTHING: &str = "nothing";
+    while idx < args.len() {
+
+        // We've parsed at least one route, and expect to see
+        // 'and' if we have mroe routes to parse now.
+        if and_comes_next {
+            let and_str = &*args[idx];
+            if and_str != "and" {
+                return Err(err!("I expect to see 'and' expected between routes, but I was given '{}' instead", and_str));
+            }
+            idx += 1;
+        }
+        // Every subsequent route will require
+        // "and" separating it from the last one:
+        and_comes_next = true;
+
+        let arg = &args[idx];
+
+        // "nothing" can take the place of an entire route:
+        if arg == NOTHING {
+            // ignore a trailing "nothing"
+            if idx == args.len() - 1 {
+                idx += 1;
+                continue
+            }
+            // ignore "nothing and" (the "and" bit is handled on the next loop)
+            if &*args[idx+1] == "and" {
+                idx += 1;
+                continue
+            }
+            // Specifically, we don't ignore "nothing to _",
+            // since that is handled later.
+        }
+
+        // Make sure we have enough args to form a route.
+        if idx + 1 >= args.len() {
+            return Err(err!("Not enough args provided; routes of the form \
+                            '[src] to [dest]' are expected, but I was given '{}'", arg));
+        }
+        if idx + 2 >= args.len() {
+            return Err(err!("Not enough args provided; routes of the form \
+                            '[src] to [dest]' are expected, but I was given '{} {}'", arg, args[idx+1]));
+        }
+
+        let src_str = arg;
+        let to_str = &*args[idx+1];
+        let dest_str = &*args[idx+2];
+        idx += 3;
+
+        // Parse the source location:
+        let src = match SrcLocation::parse(src_str.clone()) {
+            Ok(src) => src,
+            Err(e) => { return Err(err!("'{}' is not a valid source location: {}", src_str, e)) }
+        };
+
+        // Expect "to" to separate src and dest:
+        if to_str != "to" {
+            return Err(err!("'{}' should be followed by 'to' and \
+                             then a destination location", src_str))
+        }
+
+        // Parse the dest location:
+        let dest = match DestLocation::parse(dest_str, &src) {
+            Ok(dest) => dest,
+            Err(e) => { return Err(err!("'{}' is not a valid destination location: {}", dest_str, e)) }
+        };
+
+        // Push these to a new route:
+        routes.push(Route {
+            src,
+            dest
+        });
+
+    }
+
+    // Hand back our routes, plus the rest of the args that we haven't iterated yet,
+    // if things were successful:
+    Ok(( routes, rest ))
 }
 
 #[derive(Debug,Clone,PartialEq)]
@@ -153,8 +156,69 @@ mod test {
                 ],
                 0
             ),
+            // We can use "nothing" alone but it is a noop
             (
-                vec![s("8080/foo/bar"), s("to"), s("9090/foo"), s("more"), s("args")],
+                vec![s("nothing")],
+                vec![],
+                0
+            ),
+            // We can use "nothing" alone but it is a noop
+            (
+                vec![s("nothing"), s("-arg")],
+                vec![],
+                1
+            ),
+            // We can use "nothing" in place of an entire route to allow slightly
+            // easier programmatic route providing:
+            (
+                vec![s("nothing"), s("and"), s("8080"), s("to"), s("9090")],
+                vec![
+                    route("http://localhost:8080/", "http://localhost:9090")
+                ],
+                0
+            ),
+            // We can use "nothing" at the end as well:
+            (
+                vec![s("8080"), s("to"), s("9090"), s("and"), s("nothing")],
+                vec![
+                    route("http://localhost:8080/", "http://localhost:9090")
+                ],
+                0
+            ),
+            // We can use "nothing" in the middle as well:
+            (
+                vec![
+                    s("8080"), s("to"), s("9090"), s("and"),
+                    s("nothing"), s("and"),
+                    s("8081"), s("to"), s("9091"), s("and"),
+                    s("nothing"), s("and"),
+                    s("nothing"), s("and"),
+                    s("8082"), s("to"), s("9092"),
+                ],
+                vec![
+                    route("http://localhost:8080/", "http://localhost:9090"),
+                    route("http://localhost:8081/", "http://localhost:9091"),
+                    route("http://localhost:8082/", "http://localhost:9092"),
+                ],
+                0
+            ),
+            // // "nothing" can take the palce of a destination (it'll return 404):
+            // (
+            //     vec![
+            //         s("nothing"), s("to"), s("9090"), s("and"),
+            //         s("8081"), s("to"), s("9091"), s("and"),
+            //         s("nothing"), s("and"),
+            //         s("nothing"), s("and"),
+            //         s("8082"), s("to"), s("9092"),
+            //     ],
+            //     vec![
+            //         route("http://localhost:8081/", "http://localhost:9091"),
+            //         route("http://localhost:8082/", "http://localhost:9092"),
+            //     ],
+            //     0
+            // ),
+            (
+                vec![s("8080/foo/bar"), s("to"), s("9090/foo"), s("--more"), s("args")],
                 vec![
                     route("http://localhost:8080/foo/bar", "http://localhost:9090/foo")
                 ],
@@ -163,7 +227,7 @@ mod test {
             (
                 vec![s("8080/foo/bar"), s("to"), s("9090/foo"), s("and"),
                      s("9091"), s("to"), s("9090/lark"),
-                     s("more"), s("args")],
+                     s("-more"), s("args")],
                 vec![
                     route("http://localhost:8080/foo/bar", "http://localhost:9090/foo"),
                     route("http://localhost:9091/", "http://localhost:9090/lark")
@@ -173,11 +237,11 @@ mod test {
         ];
 
         for (a,b,left) in routes {
-            match from_args(a.clone()) {
+            match from_args(&a) {
                 Err(e) => panic!("Could not parse {:?}: {}", a, e),
                 Ok(r) => {
                     assert_eq!(r.0, b, "Unexpected parse of {:?}: {:?}", a, r.0);
-                    let actual_left = r.1.count();
+                    let actual_left = r.1.len();
                     assert_eq!(actual_left, left, "Wrong number of remaining for {:?}; expected {}, got {}", a, left, actual_left);
                 }
             }
@@ -193,11 +257,11 @@ mod test {
             vec![s("9090"), s("to"), s("9091"), s("and"), s("--option")],
         ];
         for r in bad_routes {
-            let parsed = from_args(r.clone());
+            let parsed = from_args(&r);
             assert!(
                 parsed.is_err(),
                 "Args {:?} should not successfully parse, but parsed to {:?}",
-                r, parsed.map(|(a,b)| (a, b.collect::<Vec<_>>()))
+                r, parsed.map(|(a,b)| (a, b))
             );
         }
     }

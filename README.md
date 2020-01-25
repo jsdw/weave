@@ -91,6 +91,19 @@ weave '=8080/(base..)/api/(filename)' to './files/(filename).json'
 # http://localhost:8080/api/foo => No route matches this
 ```
 
+Return HTTP status codes for some paths:
+```
+# Pick a specific status code (only valid HTTP status codes are allowed):
+weave 8080 to statuscode://403
+# The alias "nothing" returns a 404 Not Found status:
+weave 8080 to nothing
+```
+
+Declare routes that do nothing using "nothing" (can be useful for scripted use):
+```
+weave nothing and 8080 to 9090
+```
+
 `and` can be used to serve any number of routes simultaneously. Keep reading for more information on the different types of routes, and how they are prioritised.
 
 # Installation
@@ -102,13 +115,13 @@ Prebuilt compressed binaries are available [here](https://github.com/jsdw/weave/
 If you like, you can download and decompress the latest release on the commandline. On **MacOS**, run:
 
 ```
-curl -L https://github.com/jsdw/weave/releases/download/v0.4.1/weave-v0.4.1-x86_64-apple-darwin.tar.gz | tar -xz
+curl -L https://github.com/jsdw/weave/releases/download/v0.5.0/weave-v0.5.0-x86_64-apple-darwin.tar.gz | tar -xz
 ```
 
 For **Linux**, run:
 
 ```
-curl -L https://github.com/jsdw/weave/releases/download/v0.4.1/weave-v0.4.1-x86_64-unknown-linux-musl.tar.gz | tar -xz
+curl -L https://github.com/jsdw/weave/releases/download/v0.5.0/weave-v0.5.0-x86_64-unknown-linux-musl.tar.gz | tar -xz
 ```
 
 In either case, you'll end up with a `weave` binary in your current folder. The examples assume that you have placed this into your `$PATH` so that it can be called from anywhere.
@@ -119,10 +132,10 @@ Alternately, you can compile `weave` from source.
 
 First, go to [https://www.rust-lang.org/tools/install](https://www.rust-lang.org/tools/install) and install Rust.
 
-Then to install a release of `weave` (here, v0.4.1), run the following:
+Then to install a release of `weave` (here, v0.5.0), run the following:
 
 ```
-cargo install --git https://github.com/jsdw/weave.git --tag v0.4.1 --force
+cargo install --git https://github.com/jsdw/weave.git --tag v0.5.0 --force
 ```
 
 This installs the latest version of `weave` into a local `.cargo/bin` folder that the rust installation will have prompted you to add to your `$PATH`. The `--force` command overwrites any existing `weave` binary in this folder; you can ditch it if you don't want this behaviour.

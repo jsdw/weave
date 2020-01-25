@@ -1,3 +1,12 @@
+# 0.5.0
+
+## Additions
+
+- allow "nothing" to be substituted for a route on the CLI (eg `weave nothing and 8080 to 9090`),
+  to aid in basic scripted usage.
+- allow HTTP sources to be redirected to HTTP status codes (eg `weave 8080 to statuscode://403`).
+- support "nothing" as an alias for a 404 status code (eg `weave 8080 to nothing`).
+
 # 0.4.1
 
 ## Improvements
