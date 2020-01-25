@@ -57,6 +57,9 @@ local folder:
 
 Return HTTP status codes for some paths:
 {example9}
+{example9b}
+{example9c}
+{example9d}
 
 Declare routes that do nothing using \"nothing\" (can be useful for scripted use):
 {example10}
@@ -118,12 +121,12 @@ Declare routes that do nothing using \"nothing\" (can be useful for scripted use
 # http://localhost:8080/bar/api/foo => ./files/foo.json
 # http://localhost:8080/api/foo => No route matches this".white(),
 
-    example9="# Pick a specific status code (only valid HTTP status codes are allowed):
-weave 8080 to statuscode://403
-# The alias \"nothing\" returns a 404 Not Found status:
-weave 8080 to nothing",
+    example9="# Pick a specific status code (only valid HTTP status codes are allowed):".white(),
+    example9b="weave 8080 to statuscode://403".cyan(),
+    example9c="# The alias \"nothing\" returns a 404 Not Found status:".white(),
+    example9d="weave 8080 to nothing".cyan(),
 
-    example10="weave nothing and 8080 to 9090"
+    example10="weave nothing and 8080 to 9090".cyan()
 
     ))
 }
